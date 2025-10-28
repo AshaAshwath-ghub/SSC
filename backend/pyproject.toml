@@ -1,0 +1,74 @@
+[tool.poetry]
+name = "app-backend"
+version = "1.0.0"
+description = "Full-stack application backend"
+authors = ["Your Team"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+fastapi = "^0.115.0"
+uvicorn = {extras = ["standard"], version = "^0.32.0"}
+sqlalchemy = {extras = ["asyncio"], version = "^2.0.36"}
+alembic = "^1.14.0"
+pydantic = {extras = ["email"], version = "^2.10.0"}
+pydantic-settings = "^2.6.0"
+python-jose = {extras = ["cryptography"], version = "^3.3.0"}
+passlib = {extras = ["argon2"], version = "^1.7.4"}
+python-multipart = "^0.0.12"
+aiofiles = "^24.1.0"
+httpx = "^0.28.0"
+
+# Database drivers
+asyncpg = "^0.30.0"  # PostgreSQL
+aioodbc = "^0.5.0"  # SQL Server
+motor = "^3.6.0"  # MongoDB
+redis = {extras = ["hiredis"], version = "^5.2.0"}
+
+# Auth providers
+twilio = "^9.3.7"
+duo-client = "^5.3.0"
+pyotp = "^2.9.0"
+qrcode = "^8.0"
+
+# Google services
+google-auth = "^2.36.0"
+google-auth-oauthlib = "^1.2.1"
+
+# Utilities
+python-dotenv = "^1.0.1"
+tenacity = "^9.0.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3.4"
+pytest-asyncio = "^0.24.0"
+pytest-cov = "^6.0.0"
+httpx = "^0.28.0"
+black = "^24.10.0"
+mypy = "^1.13.0"
+ruff = "^0.8.2"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 120
+target-version = ['py311']
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = "-v --cov=app --cov-report=html --cov-report=term"

@@ -1,0 +1,52 @@
+# FastAPI Backend Requirements
+# Generated from pyproject.toml
+# Install with: pip install -r requirements.txt
+
+# Core Framework
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+
+# Database - SQL
+sqlalchemy[asyncio]>=2.0.36
+alembic>=1.14.0
+
+# Database Drivers
+asyncpg>=0.30.0  # PostgreSQL
+aioodbc>=0.5.0   # SQL Server
+motor>=3.6.0     # MongoDB (async)
+redis[hiredis]>=5.2.0  # Redis with C parser
+
+# Data Validation
+pydantic[email]>=2.10.0
+pydantic-settings>=2.6.0
+
+# Authentication & Security
+python-jose[cryptography]>=3.3.0
+passlib[argon2]>=1.7.4
+python-multipart>=0.0.12
+
+# External Services
+twilio>=9.3.7              # SMS/Voice
+duo-client>=5.3.0          # Duo MFA
+pyotp>=2.9.0              # TOTP (2FA)
+qrcode>=8.0               # QR code generation
+
+# Google Services
+google-auth>=2.36.0
+google-auth-oauthlib>=1.2.1
+
+# HTTP Client
+httpx>=0.28.0
+
+# Utilities
+python-dotenv>=1.0.1
+aiofiles>=24.1.0
+tenacity>=9.0.0
+
+# Development Dependencies (optional - remove for production)
+pytest>=8.3.4
+pytest-asyncio>=0.24.0
+pytest-cov>=6.0.0
+black>=24.10.0
+mypy>=1.13.0
+ruff>=0.8.2
