@@ -1,5 +1,5 @@
 import PropTypes from 'prop-types';
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Link as RouterLink, useSearchParams } from 'react-router-dom';
 
 // material-ui
@@ -14,6 +14,9 @@ import InputLabel from '@mui/material/InputLabel';
 import OutlinedInput from '@mui/material/OutlinedInput';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
+import Box from '@mui/material/Box';
+import CircularProgress from '@mui/material/CircularProgress';
+import Alert from '@mui/material/Alert';
 
 // third-party
 import * as Yup from 'yup';
@@ -31,13 +34,18 @@ import { fetcher } from 'utils/axios';
 // assets
 import EyeOutlined from '@ant-design/icons/EyeOutlined';
 import EyeInvisibleOutlined from '@ant-design/icons/EyeInvisibleOutlined';
+import MobileOutlined from '@ant-design/icons/MobileOutlined';
 
 // ============================|| JWT - LOGIN ||============================ //
 
 export default function AuthLogin({ isDemo = false }) {
   const [checked, setChecked] = React.useState(false);
+  const [mfaStatus, setMfaStatus] = React.useState(null); // 'pending', 'approved', 'denied', 'error'
+  const [mfaToken, setMfaToken] = React.useState(null);
+  const [mfaMessage, setMfaMessage] = React.useState('');
+  const pollingInterval = useRef(null);
 
-  const { login } = useAuth();
+  const { login, verifyMFA } = useAuth();
 
   const [showPassword, setShowPassword] = React.useState(false);
   const handleClickShowPassword = () => {
@@ -51,36 +59,151 @@ export default function AuthLogin({ isDemo = false }) {
   const [searchParams] = useSearchParams();
   const auth = searchParams.get('auth'); // get auth and set route based on that
 
+  // Poll MFA status
+  const pollMFAStatus = async (token) => {
+    try {
+      const result = await verifyMFA(token);
+
+      if (result.status === 'approved') {
+        // Login successful
+        setMfaStatus('approved');
+        setMfaMessage('Login successful! Redirecting...');
+        clearInterval(pollingInterval.current);
+        preload('api/menu/dashboard', fetcher);
+      } else if (result.status === 'denied') {
+        // User denied the push
+        setMfaStatus('denied');
+        setMfaMessage('Push notification denied. Please try again.');
+        clearInterval(pollingInterval.current);
+      } else if (result.status === 'error') {
+        // Error occurred
+        setMfaStatus('error');
+        setMfaMessage(result.message || 'An error occurred. Please try again.');
+        clearInterval(pollingInterval.current);
+      } else {
+        // Still pending
+        setMfaMessage('Waiting for approval on your mobile device...');
+      }
+    } catch (error) {
+      console.error('MFA polling error:', error);
+      setMfaStatus('error');
+      setMfaMessage('An error occurred. Please try again.');
+      clearInterval(pollingInterval.current);
+    }
+  };
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => {
+      if (pollingInterval.current) {
+        clearInterval(pollingInterval.current);
+      }
+    };
+  }, []);
+
   return (
     <>
-      <Formik
-        initialValues={{
-          email: 'info@codedthemes.com',
-          password: '12345',
-          submit: null
-        }}
-        validationSchema={Yup.object().shape({
-          email: Yup.string().email('Must be a valid email').max(255).required('Email is required'),
-          password: Yup.string()
-            .required('Password is required')
-            .test('no-leading-trailing-whitespace', 'Password cannot start or end with spaces', (value) => value === value.trim())
-            .max(10, 'Password must be less than 10 characters')
-        })}
-        onSubmit={async (values, { setErrors, setStatus, setSubmitting }) => {
-          try {
-            const trimmedEmail = values.email.trim();
-            await login(trimmedEmail, values.password);
-            setStatus({ success: true });
-            setSubmitting(false);
-            preload('api/menu/dashboard', fetcher); // load menu on login success
-          } catch (err) {
-            console.error(err);
-            setStatus({ success: false });
-            setErrors({ submit: err.message });
-            setSubmitting(false);
-          }
-        }}
-      >
+      {mfaStatus === 'pending' && mfaToken ? (
+        // Show Duo Push waiting screen
+        <Box sx={{ textAlign: 'center', py: 4 }}>
+          <MobileOutlined style={{ fontSize: 64, color: '#1890ff', marginBottom: 16 }} />
+          <Typography variant="h3" gutterBottom>
+            Duo Push Sent
+          </Typography>
+          <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
+            {mfaMessage}
+          </Typography>
+          <CircularProgress size={40} />
+          <Button
+            variant="text"
+            onClick={() => {
+              clearInterval(pollingInterval.current);
+              setMfaStatus(null);
+              setMfaToken(null);
+              setMfaMessage('');
+            }}
+            sx={{ mt: 3, display: 'block', mx: 'auto' }}
+          >
+            Cancel
+          </Button>
+        </Box>
+      ) : mfaStatus === 'denied' || mfaStatus === 'error' ? (
+        // Show error/denied state
+        <Box>
+          <Alert severity="error" sx={{ mb: 2 }}>
+            {mfaMessage}
+          </Alert>
+          <Button
+            fullWidth
+            variant="contained"
+            onClick={() => {
+              setMfaStatus(null);
+              setMfaToken(null);
+              setMfaMessage('');
+            }}
+          >
+            Try Again
+          </Button>
+        </Box>
+      ) : (
+        // Show normal login form
+        <Formik
+          initialValues={{
+            email: 'info@codedthemes.com',
+            password: '12345',
+            submit: null
+          }}
+          validationSchema={Yup.object().shape({
+            email: Yup.string().email('Must be a valid email').max(255).required('Email is required'),
+            password: Yup.string()
+              .required('Password is required')
+              .test('no-leading-trailing-whitespace', 'Password cannot start or end with spaces', (value) => value === value.trim())
+              .max(10, 'Password must be less than 10 characters')
+          })}
+          onSubmit={async (values, { setErrors, setStatus, setSubmitting }) => {
+            try {
+              const trimmedEmail = values.email.trim();
+              const result = await login(trimmedEmail, values.password);
+
+              // Check if MFA is required
+              if (result.requires_mfa && result.mfa_token) {
+                setMfaToken(result.mfa_token);
+                setMfaStatus('pending');
+                setMfaMessage('Sending push notification...');
+
+                // Start polling for MFA status every 3 seconds
+                pollingInterval.current = setInterval(() => {
+                  pollMFAStatus(result.mfa_token);
+                }, 3000);
+
+                // Do initial poll immediately
+                setTimeout(() => pollMFAStatus(result.mfa_token), 1000);
+              } else {
+                // Normal login (no MFA)
+                setStatus({ success: true });
+                preload('api/menu/dashboard', fetcher);
+              }
+
+              setSubmitting(false);
+            } catch (err) {
+              console.error('Login error:', err);
+              setStatus({ success: false });
+
+              // Extract error message from axios error response
+              let errorMessage = 'An error occurred during login';
+              if (err.response?.data?.detail) {
+                errorMessage = err.response.data.detail;
+              } else if (err.response?.data?.message) {
+                errorMessage = err.response.data.message;
+              } else if (err.message) {
+                errorMessage = err.message;
+              }
+
+              setErrors({ submit: errorMessage });
+              setSubmitting(false);
+            }
+          }}
+        >
         {({ errors, handleBlur, handleChange, handleSubmit, isSubmitting, touched, values }) => (
           <form noValidate onSubmit={handleSubmit}>
             <Grid container spacing={3}>
@@ -177,8 +300,9 @@ export default function AuthLogin({ isDemo = false }) {
               </Grid>
             </Grid>
           </form>
-        )}
-      </Formik>
+          )}
+        </Formik>
+      )}
     </>
   );
 }

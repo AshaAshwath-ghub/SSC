@@ -55,13 +55,25 @@ export const JWTProvider = ({ children }) => {
         const serviceToken = window.localStorage.getItem('serviceToken');
         if (serviceToken && verifyToken(serviceToken)) {
           setSession(serviceToken);
-          // Decode token to get user info
-          const decoded = jwtDecode(serviceToken);
-          const user = {
-            id: decoded.sub,
-            email: decoded.email,
-            username: decoded.username
-          };
+
+          // Try to get stored user data first (from OAuth callback)
+          const storedUser = window.localStorage.getItem('user');
+          let user;
+
+          if (storedUser) {
+            // Use stored user data (has complete profile info)
+            user = JSON.parse(storedUser);
+          } else {
+            // Fallback: decode token to get basic user info
+            const decoded = jwtDecode(serviceToken);
+            user = {
+              id: decoded.sub,
+              email: decoded.email,
+              username: decoded.username,
+              name: decoded.username || decoded.email
+            };
+          }
+
           dispatch({
             type: LOGIN,
             payload: {
@@ -87,7 +99,19 @@ export const JWTProvider = ({ children }) => {
 
   const login = async (email, password) => {
     const response = await axios.post('/api/v1/auth/login', { email, password });
-    const { access_token, user } = response.data;
+    const { access_token, user, requires_mfa, mfa_token, mfa_method } = response.data;
+
+    // Check if MFA is required
+    if (requires_mfa && mfa_token) {
+      // Return MFA info to the caller
+      return {
+        requires_mfa: true,
+        mfa_token,
+        mfa_method
+      };
+    }
+
+    // Normal login flow (no MFA or MFA disabled)
     setSession(access_token);
     dispatch({
       type: LOGIN,
@@ -96,6 +120,47 @@ export const JWTProvider = ({ children }) => {
         user
       }
     });
+
+    return {
+      requires_mfa: false,
+      user
+    };
+  };
+
+  const verifyMFA = async (mfa_token, passcode = null) => {
+    const response = await axios.post('/api/v1/auth/mfa/verify', {
+      mfa_token,
+      passcode
+    });
+
+    const { status, message, access_token, refresh_token, user } = response.data;
+
+    if (status === 'approved' && access_token) {
+      // MFA approved - complete login
+      setSession(access_token);
+
+      if (refresh_token) {
+        localStorage.setItem('refreshToken', refresh_token);
+      }
+
+      // Store user data
+      if (user) {
+        localStorage.setItem('user', JSON.stringify(user));
+      }
+
+      dispatch({
+        type: LOGIN,
+        payload: {
+          isLoggedIn: true,
+          user
+        }
+      });
+
+      return { status: 'approved', user };
+    }
+
+    // Return status for pending, denied, or error
+    return { status, message };
   };
 
   const register = async (email, password, firstName, lastName) => {
@@ -128,6 +193,8 @@ export const JWTProvider = ({ children }) => {
 
   const logout = () => {
     setSession(null);
+    localStorage.removeItem('user');
+    localStorage.removeItem('refreshToken');
     dispatch({ type: LOGOUT });
   };
 
@@ -137,11 +204,47 @@ export const JWTProvider = ({ children }) => {
 
   const updateProfile = () => {};
 
+  const handleOAuthSession = (sessionData) => {
+    // Handle OAuth session - called from OAuth callback
+    if (sessionData && sessionData.accessToken) {
+      setSession(sessionData.accessToken);
+
+      // Store refresh token if provided
+      if (sessionData.refreshToken) {
+        localStorage.setItem('refreshToken', sessionData.refreshToken);
+      }
+
+      // Dispatch login action with user data
+      dispatch({
+        type: LOGIN,
+        payload: {
+          isLoggedIn: true,
+          user: sessionData.user
+        }
+      });
+    }
+  };
+
   if (state.isInitialized !== undefined && !state.isInitialized) {
     return <Loader />;
   }
 
-  return <JWTContext value={{ ...state, login, logout, register, resetPassword, updateProfile }}>{children}</JWTContext>;
+  return (
+    <JWTContext.Provider
+      value={{
+        ...state,
+        login,
+        logout,
+        register,
+        resetPassword,
+        updateProfile,
+        verifyMFA,
+        setSession: handleOAuthSession
+      }}
+    >
+      {children}
+    </JWTContext.Provider>
+  );
 };
 
 export default JWTContext;

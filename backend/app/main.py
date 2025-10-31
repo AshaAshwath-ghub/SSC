@@ -14,6 +14,8 @@ from app.db.adapters import init_database, close_database
 from app.db.mongodb import mongodb
 from app.db.redis import redis_manager
 from app.api.auth import router as auth_router
+from app.api.oauth import router as oauth_router
+from app.api.admin import router as admin_router
 
 
 # Setup logging
@@ -102,6 +104,8 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # Include routers
 app.include_router(auth_router, prefix=settings.api_prefix)
+app.include_router(oauth_router, prefix=settings.api_prefix)
+app.include_router(admin_router, prefix=settings.api_prefix)
 
 
 # Exception handlers

@@ -13,10 +13,9 @@ import { APP_AUTH, AuthProvider } from 'config';
 
 // assets
 import Jwt from 'assets/images/icons/jwt.svg';
-import Firebase from 'assets/images/icons/firebase.svg';
-import Auth0 from 'assets/images/icons/auth0.svg';
-import Aws from 'assets/images/icons/aws.svg';
-import Supabase from 'assets/images/icons/supabase.svg';
+import Google from 'assets/images/icons/google.svg';
+import Microsoft from 'assets/images/icons/microsoft.svg';
+import Apple from 'assets/images/icons/apple.svg';
 
 // ==============================|| SOCIAL BUTTON ||============================== //
 
@@ -26,18 +25,25 @@ export default function LoginProvider({ currentLoginWith }) {
 
   const loginHandlers = {
     Jwt: () => navigate(APP_AUTH === AuthProvider.JWT ? '/login' : '/jwt/login?auth=jwt'),
-    Firebase: () => navigate(APP_AUTH === AuthProvider.FIREBASE ? '/login' : '/firebase/login?auth=firebase'),
-    Auth0: () => navigate(APP_AUTH === AuthProvider.AUTH0 ? '/login' : '/auth0/login?auth=auth0'),
-    Aws: () => navigate(APP_AUTH === AuthProvider.AWS ? '/login' : '/aws/login?auth=aws'),
-    Supabase: () => navigate(APP_AUTH === AuthProvider.SUPABASE ? '/login' : '/supabase/login?auth=supabase')
+    Google: () => {
+      // Redirect to Google OAuth
+      window.location.href = 'http://localhost:3010/api/v1/oauth/google/authorize';
+    },
+    Microsoft: () => {
+      // Redirect to Microsoft OAuth
+      window.location.href = 'http://localhost:3010/api/v1/oauth/microsoft/authorize';
+    },
+    Apple: () => {
+      // Apple OAuth requires Apple Developer account
+      alert('Apple Login - Coming Soon\n\nApple Sign-In is currently under development.\n\nNote: Apple Sign-In requires an Apple Developer account ($99/year) to configure the necessary credentials and services.\n\nPlease use Google or Microsoft to sign in.');
+    }
   };
 
   const buttonData = [
     { name: 'jwt', icon: Jwt, handler: loginHandlers.Jwt },
-    { name: 'firebase', icon: Firebase, handler: loginHandlers.Firebase },
-    { name: 'auth0', icon: Auth0, handler: loginHandlers.Auth0 },
-    { name: 'aws', icon: Aws, handler: loginHandlers.Aws },
-    { name: 'supabase', icon: Supabase, handler: loginHandlers.Supabase }
+    { name: 'google', icon: Google, handler: loginHandlers.Google },
+    { name: 'microsoft', icon: Microsoft, handler: loginHandlers.Microsoft },
+    { name: 'apple', icon: Apple, handler: loginHandlers.Apple }
   ];
 
   const currentLoginExists = buttonData.some((button) => button.name === currentLoginWith);
