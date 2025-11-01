@@ -2,7 +2,7 @@
 Authentication schemas for request/response validation.
 """
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 from pydantic import BaseModel, EmailStr, Field
 
 
@@ -51,7 +51,8 @@ class LoginResponse(BaseModel):
     user: Optional[UserResponse] = Field(None, description="User information (only provided after MFA)")
     requires_mfa: bool = Field(default=False, description="Whether MFA is required")
     mfa_token: Optional[str] = Field(None, description="Temporary token for MFA verification")
-    mfa_method: Optional[str] = Field(None, description="MFA method required (e.g., 'duo_push')")
+    mfa_method: Optional[str] = Field(None, description="MFA method required (e.g., 'duo_push', 'selection')")
+    available_mfa_methods: Optional[List[str]] = Field(None, description="Available MFA methods user can choose from")
 
     model_config = {
         "json_schema_extra": {
@@ -68,6 +69,24 @@ class LoginResponse(BaseModel):
                         "is_verified": True
                     },
                     "requires_mfa": False
+                }
+            ]
+        }
+    }
+
+
+class MFATriggerRequest(BaseModel):
+    """Request to trigger a specific MFA method."""
+
+    mfa_token: str = Field(..., description="Temporary MFA token from login response")
+    method: str = Field(..., description="MFA method to trigger: 'duo_push', 'duo_phone', 'duo_sms', 'email_otp'")
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "mfa_token": "temp_mfa_token_here",
+                    "method": "duo_push"
                 }
             ]
         }

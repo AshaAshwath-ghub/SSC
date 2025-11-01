@@ -99,7 +99,7 @@ export const JWTProvider = ({ children }) => {
 
   const login = async (email, password) => {
     const response = await axios.post('/api/v1/auth/login', { email, password });
-    const { access_token, user, requires_mfa, mfa_token, mfa_method } = response.data;
+    const { access_token, user, requires_mfa, mfa_token, mfa_method, available_mfa_methods } = response.data;
 
     // Check if MFA is required
     if (requires_mfa && mfa_token) {
@@ -107,7 +107,8 @@ export const JWTProvider = ({ children }) => {
       return {
         requires_mfa: true,
         mfa_token,
-        mfa_method
+        mfa_method,
+        available_mfa_methods
       };
     }
 

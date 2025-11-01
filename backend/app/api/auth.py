@@ -22,6 +22,7 @@ from app.schemas.auth import (
     LoginResponse,
     UserResponse,
     ErrorResponse,
+    MFATriggerRequest,
     MFAVerifyRequest,
     MFAStatusResponse
 )
@@ -179,43 +180,120 @@ async def login(
                         json.dumps(mfa_data)
                     )
 
-                    # Send Duo Push notification
+                    # Check if user is enrolled in Duo first
                     duo_service = get_duo_service()
-                    push_result = await duo_service.send_push_notification(
-                        username=user.email,  # Use email as Duo username
-                        push_type="Login Request",
-                        push_info={
-                            "Application": settings.app_name,
-                            "IP Address": request.client.host if request.client else "Unknown"
-                        }
-                    )
 
-                    # Update Redis with push result
-                    mfa_data["push_sent"] = True
-                    mfa_data["push_result"] = push_result.get("result")
-                    mfa_data["push_status"] = push_result.get("status")
-                    await redis_client.setex(
-                        f"mfa_token:{mfa_token}",
-                        300,
-                        json.dumps(mfa_data)
-                    )
+                    # Try email first, then fallback to username
+                    user_status = await duo_service.check_user_status(user.email)
+                    duo_identifier = user.email  # Track which identifier worked
 
-                    logger.info(f"Duo Push sent to user {user.id}, result: {push_result.get('result')}")
+                    # If email returns "enroll" but we expect they're enrolled, try username
+                    if user_status.get('result') == 'enroll':
+                        logger.info(f"Email {user.email} not found in Duo, trying username {user.username}")
+                        user_status_by_username = await duo_service.check_user_status(user.username)
+                        # Use username result if it's better than email result
+                        if user_status_by_username.get('result') == 'auth':
+                            logger.info(f"Found user in Duo by username: {user.username}")
+                            user_status = user_status_by_username
+                            duo_identifier = user.username  # Use username for push
 
-                    # Return MFA required response
-                    return LoginResponse(
-                        token_type="bearer",
-                        requires_mfa=True,
-                        mfa_token=mfa_token,
-                        mfa_method="duo_push"
-                    )
+                    duo_result = user_status.get('result')
+                    duo_status = user_status.get('status')
 
+                    logger.info(f"Duo enrollment check for user {user.id} ({user.email}): enrolled={user_status.get('enrolled')}, result={duo_result}, status={duo_status}")
+
+                    # Handle different Duo enrollment states
+                    if duo_result == "enroll":
+                        logger.warning(f"User {user.id} ({user.email}) needs to enroll a device in Duo - blocking login")
+                        raise HTTPException(
+                            status_code=status.HTTP_403_FORBIDDEN,
+                            detail="Your account requires multi-factor authentication (MFA) but you have not enrolled a device in Duo Security yet. Please contact your administrator to complete device enrollment (install Duo Mobile app and register your device) before you can log in."
+                        )
+                    elif duo_result == "deny":
+                        logger.warning(f"User {user.id} ({user.email}) denied by Duo policy - blocking login")
+                        raise HTTPException(
+                            status_code=status.HTTP_403_FORBIDDEN,
+                            detail="Your account has been denied access by security policy. Please contact your administrator."
+                        )
+                    elif duo_result == "allow":
+                        # Duo bypass is enabled for this user - allow login without push
+                        logger.info(f"User {user.id} ({user.email}) has Duo bypass enabled - skipping MFA")
+                        # Fall through to normal login without MFA
+                    elif duo_result != "auth":
+                        # User not enrolled or unknown result
+                        logger.warning(f"User {user.id} ({user.email}) not enrolled in Duo (result={duo_result}) - blocking login")
+                        raise HTTPException(
+                            status_code=status.HTTP_403_FORBIDDEN,
+                            detail="Your account requires multi-factor authentication (MFA) but you are not enrolled in Duo Security. Please contact your administrator to complete Duo registration before you can log in."
+                        )
+                    else:
+                        # duo_result == "auth" - user is fully enrolled
+                        # Get available MFA methods from Duo devices
+                        devices = user_status.get('devices', [])
+
+                        # Build list of available MFA methods
+                        available_methods = []
+
+                        # Check if user has devices that support push
+                        has_push = any(
+                            'push' in device.get('capabilities', [])
+                            for device in devices
+                        )
+                        if has_push:
+                            available_methods.append("duo_push")
+
+                        # Check if user has phone for call
+                        has_phone = any(
+                            'phone' in device.get('capabilities', [])
+                            for device in devices
+                        )
+                        if has_phone:
+                            available_methods.append("duo_phone")
+
+                        # Check if user has device for SMS
+                        has_sms = any(
+                            'sms' in device.get('capabilities', [])
+                            for device in devices
+                        )
+                        if has_sms:
+                            available_methods.append("duo_sms")
+
+                        # Email OTP is always available
+                        available_methods.append("email_otp")
+
+                        # Store MFA data with duo_identifier and available methods
+                        mfa_data["duo_identifier"] = duo_identifier
+                        mfa_data["available_methods"] = available_methods
+                        mfa_data["mfa_pending"] = True
+                        await redis_client.setex(
+                            f"mfa_token:{mfa_token}",
+                            300,
+                            json.dumps(mfa_data)
+                        )
+
+                        logger.info(f"MFA required for user {user.id}, available methods: {available_methods}")
+
+                        # Return MFA required response with available methods
+                        return LoginResponse(
+                            token_type="bearer",
+                            requires_mfa=True,
+                            mfa_token=mfa_token,
+                            mfa_method="selection",  # Indicates user needs to select
+                            available_mfa_methods=available_methods
+                        )
+
+                except HTTPException:
+                    # Re-raise HTTP exceptions (like enrollment required)
+                    raise
                 except Exception as e:
-                    logger.error(f"Error during Duo Push for user {user.id}: {str(e)}", exc_info=True)
-                    # Fall back to login without MFA on error
-                    logger.warning(f"Falling back to login without MFA due to error")
+                    logger.error(f"Unexpected error during Duo Push for user {user.id}: {str(e)}", exc_info=True)
+                    # For unexpected errors, raise a 503 Service Unavailable
+                    raise HTTPException(
+                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                        detail="Multi-factor authentication service is temporarily unavailable. Please try again later or contact support."
+                    )
 
-            # MFA disabled or error occurred - proceed with normal login
+            # MFA disabled - proceed with normal login
             # Create JWT tokens
             token_data = {
                 "sub": str(user.id),
@@ -263,6 +341,181 @@ async def login(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="An unexpected error occurred during login. Please try again later"
             )
+
+
+@router.post(
+    "/mfa/trigger",
+    status_code=status.HTTP_200_OK,
+    summary="Trigger MFA Method",
+    description="Trigger the selected MFA method (Duo Push, Phone Call, SMS, or Email OTP)"
+)
+async def trigger_mfa(
+    request: MFATriggerRequest,
+    http_request: Request
+):
+    """
+    Trigger the selected MFA method for authentication.
+
+    Args:
+        request: MFA trigger request with mfa_token and method
+        http_request: FastAPI request object
+
+    Returns:
+        Success message with instructions
+
+    Raises:
+        HTTPException: If token invalid or method not available
+    """
+    logger.info(f"MFA method trigger requested: method={request.method}, token={request.mfa_token[:8]}...")
+
+    # Get MFA data from Redis
+    redis_client = await get_redis_client()
+    mfa_data_json = await redis_client.get(f"mfa_token:{request.mfa_token}")
+
+    logger.info(f"MFA data from Redis: {mfa_data_json is not None}")
+
+    if not mfa_data_json:
+        logger.warning(f"Invalid or expired MFA token")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired MFA token"
+        )
+
+    mfa_data = json.loads(mfa_data_json)
+    available_methods = mfa_data.get("available_methods", [])
+
+    # Check if requested method is available
+    if request.method not in available_methods:
+        logger.warning(f"Method {request.method} not available. Available: {available_methods}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"MFA method '{request.method}' is not available for this user"
+        )
+
+    user_email = mfa_data.get("email")
+    duo_identifier = mfa_data.get("duo_identifier")
+
+    try:
+        if request.method == "duo_push":
+            # Send Duo Push
+            duo_service = get_duo_service()
+            push_result = await duo_service.send_push_notification(
+                username=duo_identifier,
+                push_type="Login Request",
+                push_info=None
+            )
+
+            if push_result.get("result") == "error":
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=f"Failed to send push: {push_result.get('status_msg')}"
+                )
+
+            # Update MFA data with push result
+            mfa_data["push_sent"] = True
+            mfa_data["push_result"] = push_result.get("result")
+            mfa_data["push_status"] = push_result.get("status")
+            await redis_client.setex(
+                f"mfa_token:{request.mfa_token}",
+                300,
+                json.dumps(mfa_data)
+            )
+
+            logger.info(f"Duo Push sent for token {request.mfa_token}")
+            return {
+                "status": "sent",
+                "message": "Push notification sent to your device. Please approve it to continue.",
+                "method": "duo_push"
+            }
+
+        elif request.method == "duo_phone":
+            # Send Duo Phone Call
+            duo_service = get_duo_service()
+            phone_result = await duo_service.send_phone_call(username=duo_identifier)
+
+            if phone_result.get("result") == "error":
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=f"Failed to initiate call: {phone_result.get('status_msg')}"
+                )
+
+            mfa_data["phone_sent"] = True
+            await redis_client.setex(
+                f"mfa_token:{request.mfa_token}",
+                300,
+                json.dumps(mfa_data)
+            )
+
+            logger.info(f"Duo Phone call sent for token {request.mfa_token}")
+            return {
+                "status": "sent",
+                "message": "You will receive a phone call shortly. Please answer and follow the instructions.",
+                "method": "duo_phone"
+            }
+
+        elif request.method == "duo_sms":
+            # Send Duo SMS
+            duo_service = get_duo_service()
+            sms_result = await duo_service.send_sms(username=duo_identifier)
+
+            if sms_result.get("result") == "error":
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=f"Failed to send SMS: {sms_result.get('status_msg')}"
+                )
+
+            mfa_data["sms_sent"] = True
+            await redis_client.setex(
+                f"mfa_token:{request.mfa_token}",
+                300,
+                json.dumps(mfa_data)
+            )
+
+            logger.info(f"Duo SMS sent for token {request.mfa_token}")
+            return {
+                "status": "sent",
+                "message": "SMS sent to your registered phone number. Please enter the code you receive.",
+                "method": "duo_sms"
+            }
+
+        elif request.method == "email_otp":
+            # Generate and send email OTP
+            otp_code = secrets.token_hex(3).upper()  # 6-character code
+
+            # Store OTP in Redis
+            mfa_data["email_otp"] = otp_code
+            mfa_data["otp_sent"] = True
+            await redis_client.setex(
+                f"mfa_token:{request.mfa_token}",
+                300,
+                json.dumps(mfa_data)
+            )
+
+            # TODO: Send email with OTP code
+            # For now, just log it (in production, integrate with email service)
+            logger.info(f"Email OTP generated for {user_email}: {otp_code}")
+
+            return {
+                "status": "sent",
+                "message": f"Verification code sent to {user_email}. Please check your email and enter the code.",
+                "method": "email_otp",
+                "otp": otp_code  # REMOVE THIS IN PRODUCTION! Only for testing
+            }
+
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unknown MFA method: {request.method}"
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error triggering MFA method {request.method}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to trigger MFA method"
+        )
 
 
 @router.post(

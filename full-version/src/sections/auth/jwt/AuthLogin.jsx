@@ -40,9 +40,11 @@ import MobileOutlined from '@ant-design/icons/MobileOutlined';
 
 export default function AuthLogin({ isDemo = false }) {
   const [checked, setChecked] = React.useState(false);
-  const [mfaStatus, setMfaStatus] = React.useState(null); // 'pending', 'approved', 'denied', 'error'
+  const [mfaStatus, setMfaStatus] = React.useState(null); // 'pending', 'approved', 'denied', 'error', 'selection'
   const [mfaToken, setMfaToken] = React.useState(null);
   const [mfaMessage, setMfaMessage] = React.useState('');
+  const [availableMfaMethods, setAvailableMfaMethods] = React.useState([]);
+  const [selectedMethod, setSelectedMethod] = React.useState(null);
   const pollingInterval = useRef(null);
 
   const { login, verifyMFA } = useAuth();
@@ -59,10 +61,67 @@ export default function AuthLogin({ isDemo = false }) {
   const [searchParams] = useSearchParams();
   const auth = searchParams.get('auth'); // get auth and set route based on that
 
+  // Trigger selected MFA method
+  const triggerMfaMethod = async (method) => {
+    try {
+      console.log('Triggering MFA method:', method, 'with token:', mfaToken);
+
+      // IMMEDIATELY show the waiting screen
+      setSelectedMethod(method);
+      setMfaStatus('pending');
+      setMfaMessage('Sending authentication request...');
+
+      const apiUrl = (import.meta.env.VITE_APP_API_URL || 'http://localhost:3010').replace(/\/$/, '');
+      const url = `${apiUrl}/api/v1/auth/mfa/trigger`;
+      console.log('Calling endpoint:', url);
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          mfa_token: mfaToken,
+          method: method
+        })
+      });
+
+      console.log('Trigger response status:', response.status);
+      const data = await response.json();
+      console.log('Trigger response data:', data);
+
+      if (!response.ok) {
+        throw new Error(data.detail || 'Failed to trigger MFA method');
+      }
+
+      // Update message with server response
+      console.log('MFA triggered successfully');
+      setMfaMessage(data.message || 'Please check your device for authentication request.');
+
+      // Start polling for MFA status after a short delay
+      setTimeout(() => {
+        console.log('Starting MFA polling...');
+        pollingInterval.current = setInterval(() => {
+          pollMFAStatus(mfaToken);
+        }, 3000);
+
+        // Do initial poll
+        pollMFAStatus(mfaToken);
+      }, 2000);
+
+    } catch (error) {
+      console.error('MFA trigger error:', error);
+      setMfaStatus('error');
+      setMfaMessage(error.message || 'Failed to send authentication request. Please try again.');
+    }
+  };
+
   // Poll MFA status
   const pollMFAStatus = async (token) => {
     try {
+      console.log('Polling MFA status...');
       const result = await verifyMFA(token);
+      console.log('Poll result:', result);
 
       if (result.status === 'approved') {
         // Login successful
@@ -73,7 +132,7 @@ export default function AuthLogin({ isDemo = false }) {
       } else if (result.status === 'denied') {
         // User denied the push
         setMfaStatus('denied');
-        setMfaMessage('Push notification denied. Please try again.');
+        setMfaMessage('Authentication denied. Please try again.');
         clearInterval(pollingInterval.current);
       } else if (result.status === 'error') {
         // Error occurred
@@ -101,14 +160,113 @@ export default function AuthLogin({ isDemo = false }) {
     };
   }, []);
 
+  // Debug logging
+  console.log('Current state - mfaStatus:', mfaStatus, 'mfaToken:', mfaToken ? 'present' : 'null', 'selectedMethod:', selectedMethod);
+
   return (
     <>
-      {mfaStatus === 'pending' && mfaToken ? (
-        // Show Duo Push waiting screen
+      {mfaStatus === 'selection' && mfaToken ? (
+        // Show MFA method selection screen
+        <Box sx={{ py: 2 }}>
+          <Typography variant="h4" gutterBottom>
+            Choose Authentication Method
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+            Select how you want to verify your identity
+          </Typography>
+
+          <Stack spacing={2}>
+            {availableMfaMethods.includes('duo_push') && (
+              <Button
+                fullWidth
+                variant="outlined"
+                size="large"
+                onClick={() => triggerMfaMethod('duo_push')}
+                startIcon={<MobileOutlined />}
+                sx={{ justifyContent: 'flex-start', py: 2, textAlign: 'left' }}
+              >
+                <Box>
+                  <Typography variant="subtitle1">Duo Push Notification</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Get a push notification on your Duo Mobile app
+                  </Typography>
+                </Box>
+              </Button>
+            )}
+
+            {availableMfaMethods.includes('duo_phone') && (
+              <Button
+                fullWidth
+                variant="outlined"
+                size="large"
+                onClick={() => triggerMfaMethod('duo_phone')}
+                startIcon={<MobileOutlined />}
+                sx={{ justifyContent: 'flex-start', py: 2, textAlign: 'left' }}
+              >
+                <Box>
+                  <Typography variant="subtitle1">Phone Call</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Receive an automated phone call
+                  </Typography>
+                </Box>
+              </Button>
+            )}
+
+            {availableMfaMethods.includes('duo_sms') && (
+              <Button
+                fullWidth
+                variant="outlined"
+                size="large"
+                onClick={() => triggerMfaMethod('duo_sms')}
+                startIcon={<MobileOutlined />}
+                sx={{ justifyContent: 'flex-start', py: 2, textAlign: 'left' }}
+              >
+                <Box>
+                  <Typography variant="subtitle1">SMS Passcode</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Get a one-time code via text message
+                  </Typography>
+                </Box>
+              </Button>
+            )}
+
+            {availableMfaMethods.includes('email_otp') && (
+              <Button
+                fullWidth
+                variant="outlined"
+                size="large"
+                onClick={() => triggerMfaMethod('email_otp')}
+                startIcon={<MobileOutlined />}
+                sx={{ justifyContent: 'flex-start', py: 2, textAlign: 'left' }}
+              >
+                <Box>
+                  <Typography variant="subtitle1">Email Verification Code</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Get a one-time code via email
+                  </Typography>
+                </Box>
+              </Button>
+            )}
+          </Stack>
+
+          <Button
+            variant="text"
+            onClick={() => {
+              setMfaStatus(null);
+              setMfaToken(null);
+              setAvailableMfaMethods([]);
+            }}
+            sx={{ mt: 3, display: 'block', mx: 'auto' }}
+          >
+            Back to Login
+          </Button>
+        </Box>
+      ) : mfaStatus === 'pending' && mfaToken ? (
+        // Show authentication waiting screen
         <Box sx={{ textAlign: 'center', py: 4 }}>
           <MobileOutlined style={{ fontSize: 64, color: '#1890ff', marginBottom: 16 }} />
           <Typography variant="h3" gutterBottom>
-            Duo Push Sent
+            {selectedMethod === 'duo_push' ? 'Duo Push Sent' : 'Authentication Requested'}
           </Typography>
           <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
             {mfaMessage}
@@ -118,13 +276,12 @@ export default function AuthLogin({ isDemo = false }) {
             variant="text"
             onClick={() => {
               clearInterval(pollingInterval.current);
-              setMfaStatus(null);
-              setMfaToken(null);
-              setMfaMessage('');
+              setMfaStatus('selection');
+              setSelectedMethod(null);
             }}
             sx={{ mt: 3, display: 'block', mx: 'auto' }}
           >
-            Cancel
+            Choose Different Method
           </Button>
         </Box>
       ) : mfaStatus === 'denied' || mfaStatus === 'error' ? (
@@ -149,8 +306,8 @@ export default function AuthLogin({ isDemo = false }) {
         // Show normal login form
         <Formik
           initialValues={{
-            email: 'info@codedthemes.com',
-            password: '12345',
+            email: 'niteesh.kl@jillellagroup.com',
+            password: 'SecurePass123!',
             submit: null
           }}
           validationSchema={Yup.object().shape({
@@ -158,26 +315,42 @@ export default function AuthLogin({ isDemo = false }) {
             password: Yup.string()
               .required('Password is required')
               .test('no-leading-trailing-whitespace', 'Password cannot start or end with spaces', (value) => value === value.trim())
-              .max(10, 'Password must be less than 10 characters')
           })}
           onSubmit={async (values, { setErrors, setStatus, setSubmitting }) => {
             try {
               const trimmedEmail = values.email.trim();
               const result = await login(trimmedEmail, values.password);
+              console.log('Login result:', result);
 
               // Check if MFA is required
               if (result.requires_mfa && result.mfa_token) {
                 setMfaToken(result.mfa_token);
-                setMfaStatus('pending');
-                setMfaMessage('Sending push notification...');
+                console.log('MFA required, token:', result.mfa_token);
+                console.log('MFA method:', result.mfa_method);
+                console.log('Available methods:', result.available_mfa_methods);
 
-                // Start polling for MFA status every 3 seconds
-                pollingInterval.current = setInterval(() => {
-                  pollMFAStatus(result.mfa_token);
-                }, 3000);
+                // Check if user needs to select MFA method
+                if (result.mfa_method === 'selection' && result.available_mfa_methods && result.available_mfa_methods.length > 0) {
+                  // Show MFA selection screen
+                  console.log('Showing MFA selection screen');
+                  setMfaStatus('selection');
+                  setAvailableMfaMethods(result.available_mfa_methods);
+                  setMfaMessage('Please select an authentication method to continue');
+                  // Do NOT start polling yet - wait for user to select method
+                } else {
+                  // Auto-send (backward compatibility for non-selection flows)
+                  console.warn('No selection - auto-triggering MFA (this should not happen with new flow)');
+                  setMfaStatus('pending');
+                  setMfaMessage('Sending authentication request...');
 
-                // Do initial poll immediately
-                setTimeout(() => pollMFAStatus(result.mfa_token), 1000);
+                  // Start polling for MFA status every 3 seconds
+                  pollingInterval.current = setInterval(() => {
+                    pollMFAStatus(result.mfa_token);
+                  }, 3000);
+
+                  // Do initial poll immediately
+                  setTimeout(() => pollMFAStatus(result.mfa_token), 1000);
+                }
               } else {
                 // Normal login (no MFA)
                 setStatus({ success: true });

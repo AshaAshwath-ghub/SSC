@@ -55,17 +55,32 @@ class DuoSecurityService:
             logger.info(f"Sending Duo push notification to user: {username}")
 
             # Prepare push info (additional context shown to user)
-            if push_info is None:
-                push_info = {}
+            # Note: Duo API is very strict about pushinfo format - skip if None
+            if push_info is None or not push_info:
+                logger.info(f"Sending Duo push without pushinfo")
+                # Call Duo Auth API to send push WITHOUT pushinfo
+                response = self.auth_api.auth(
+                    factor="push",
+                    username=username,
+                    device=device,
+                    type=push_type
+                )
+            else:
+                # Ensure all pushinfo values are strings
+                clean_push_info = {}
+                for key, value in push_info.items():
+                    clean_push_info[str(key)] = str(value) if value is not None else ""
 
-            # Call Duo Auth API to send push
-            response = self.auth_api.auth(
-                factor="push",
-                username=username,
-                device=device,
-                type=push_type,
-                pushinfo=push_info
-            )
+                logger.info(f"Push info being sent: {clean_push_info}")
+
+                # Call Duo Auth API to send push WITH pushinfo
+                response = self.auth_api.auth(
+                    factor="push",
+                    username=username,
+                    device=device,
+                    type=push_type,
+                    pushinfo=clean_push_info
+                )
 
             logger.info(f"Duo push response for {username}: {response.get('result')}")
 
@@ -76,7 +91,7 @@ class DuoSecurityService:
                 "trusted_device_token": response.get("trusted_device_token"),
             }
 
-        except duo_client.DuoAPIError as e:
+        except RuntimeError as e:
             logger.error(f"Duo API error for user {username}: {str(e)}")
             return {
                 "result": "error",
@@ -91,6 +106,94 @@ class DuoSecurityService:
                 "status": "error",
                 "status_msg": "An unexpected error occurred",
                 "trusted_device_token": None,
+            }
+
+    async def send_phone_call(self, username: str, device: str = "auto") -> Dict:
+        """
+        Send a phone call to user's device via Duo.
+
+        Args:
+            username: Duo username
+            device: Device identifier or "auto" for auto-select
+
+        Returns:
+            Dictionary with authentication result
+        """
+        try:
+            logger.info(f"Sending Duo phone call to user: {username}")
+
+            # Call Duo Auth API to send phone call
+            response = self.auth_api.auth(
+                factor="phone",
+                username=username,
+                device=device
+            )
+
+            logger.info(f"Duo phone call response for {username}: {response.get('result')}")
+
+            return {
+                "result": response.get("result"),
+                "status": response.get("status"),
+                "status_msg": response.get("status_msg", ""),
+            }
+
+        except RuntimeError as e:
+            logger.error(f"Duo API error for phone call {username}: {str(e)}")
+            return {
+                "result": "error",
+                "status": "error",
+                "status_msg": f"Duo phone call error: {str(e)}",
+            }
+        except Exception as e:
+            logger.error(f"Unexpected error during Duo phone call for {username}: {str(e)}", exc_info=True)
+            return {
+                "result": "error",
+                "status": "error",
+                "status_msg": "An unexpected error occurred",
+            }
+
+    async def send_sms(self, username: str, device: str = "auto") -> Dict:
+        """
+        Send an SMS passcode to user's device via Duo.
+
+        Args:
+            username: Duo username
+            device: Device identifier or "auto" for auto-select
+
+        Returns:
+            Dictionary with authentication result
+        """
+        try:
+            logger.info(f"Sending Duo SMS to user: {username}")
+
+            # Call Duo Auth API to send SMS
+            response = self.auth_api.auth(
+                factor="sms",
+                username=username,
+                device=device
+            )
+
+            logger.info(f"Duo SMS response for {username}: {response.get('result')}")
+
+            return {
+                "result": response.get("result"),
+                "status": response.get("status"),
+                "status_msg": response.get("status_msg", ""),
+            }
+
+        except RuntimeError as e:
+            logger.error(f"Duo API error for SMS {username}: {str(e)}")
+            return {
+                "result": "error",
+                "status": "error",
+                "status_msg": f"Duo SMS error: {str(e)}",
+            }
+        except Exception as e:
+            logger.error(f"Unexpected error during Duo SMS for {username}: {str(e)}", exc_info=True)
+            return {
+                "result": "error",
+                "status": "error",
+                "status_msg": "An unexpected error occurred",
             }
 
     async def verify_otp(self, username: str, passcode: str) -> Dict:
@@ -119,7 +222,7 @@ class DuoSecurityService:
                 "status_msg": response.get("status_msg", ""),
             }
 
-        except duo_client.DuoAPIError as e:
+        except RuntimeError as e:
             logger.error(f"Duo OTP verification error for {username}: {str(e)}")
             return {
                 "result": "error",
@@ -146,20 +249,31 @@ class DuoSecurityService:
         """
         try:
             # Perform a preauth check
+            logger.info(f"Checking Duo enrollment status for user: {username}")
             response = self.auth_api.preauth(username=username)
 
+            result = response.get("result")
+            status_msg = response.get("status_msg", "")
+            devices = response.get("devices", [])
+
+            logger.info(f"Duo preauth response for {username}: result={result}, status={status_msg}, devices_count={len(devices)}")
+
+            enrolled = result == "auth"
+
             return {
-                "enrolled": response.get("result") == "auth",
-                "status": response.get("status_msg", ""),
-                "devices": response.get("devices", []),
+                "enrolled": enrolled,
+                "status": status_msg,
+                "devices": devices,
+                "result": result,  # Include the raw result for debugging
             }
 
-        except duo_client.DuoAPIError as e:
-            logger.error(f"Error checking Duo status for {username}: {str(e)}")
+        except RuntimeError as e:
+            logger.error(f"Duo API error checking status for {username}: {str(e)}", exc_info=True)
             return {
                 "enrolled": False,
                 "status": f"Error: {str(e)}",
                 "devices": [],
+                "result": "error",
             }
         except Exception as e:
             logger.error(f"Unexpected error checking Duo status for {username}: {str(e)}", exc_info=True)
@@ -167,6 +281,7 @@ class DuoSecurityService:
                 "enrolled": False,
                 "status": "An unexpected error occurred",
                 "devices": [],
+                "result": "error",
             }
 
     async def get_user_devices(self, username: str) -> list:

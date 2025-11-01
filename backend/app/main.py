@@ -79,12 +79,37 @@ async def add_request_id(request, call_next):
 
 @app.middleware("http")
 async def log_requests(request, call_next):
-    """Log all incoming requests."""
-    logger.info(f"{request.method} {request.url.path}")
+    """Log all incoming requests with detailed access logging."""
+    import time
+
+    start_time = time.time()
 
     response = await call_next(request)
 
-    logger.info(f"{request.method} {request.url.path} - {response.status_code}")
+    process_time = (time.time() - start_time) * 1000  # Convert to milliseconds
+
+    # Get status code color/level
+    if response.status_code < 300:
+        log_level = "info"
+    elif response.status_code < 400:
+        log_level = "info"
+    elif response.status_code < 500:
+        log_level = "warning"
+    else:
+        log_level = "error"
+
+    # Format: METHOD /path STATUS_CODE - TIME ms
+    log_msg = f"{request.method} {request.url.path} → {response.status_code} ({process_time:.2f}ms)"
+
+    # Add query params if present
+    if request.url.query:
+        log_msg += f" ?{request.url.query}"
+
+    getattr(logger, log_level)(log_msg)
+
+    # Add processing time to response headers
+    response.headers["X-Process-Time"] = f"{process_time:.2f}ms"
+
     return response
 
 

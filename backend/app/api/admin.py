@@ -10,6 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import hash_password
 from app.core.logging import get_logger
+from app.core.duo_security import get_duo_service
+from app.core.config import settings
 from app.db.adapters import get_database_adapter
 from app.db.models.user import User
 
@@ -268,5 +270,150 @@ async def list_users():
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to fetch users: {str(e)}"
             )
+        finally:
+            break
+
+
+class DuoEnrollmentResponse(BaseModel):
+    """Response model for Duo enrollment status."""
+    user_email: str
+    duo_enrolled: bool
+    duo_result: str
+    duo_status: str
+    devices_count: int
+    devices: list
+    enrollment_url: Optional[str] = None
+    instructions: str
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "user_email": "user@example.com",
+                "duo_enrolled": False,
+                "duo_result": "enroll",
+                "duo_status": "Enroll an authentication device to proceed",
+                "devices_count": 0,
+                "devices": [],
+                "enrollment_url": "https://api-xxxxx.duosecurity.com/portal",
+                "instructions": "User needs to install Duo Mobile app and enroll a device. Share the enrollment URL with them."
+            }
+        }
+
+
+@router.get(
+    "/duo/enrollment/{email}",
+    response_model=DuoEnrollmentResponse,
+    summary="Check Duo enrollment status for a user",
+    description="Check if a user is enrolled in Duo Security and get their enrollment details",
+    responses={
+        200: {"description": "Duo enrollment status", "model": DuoEnrollmentResponse},
+        404: {"description": "User not found in local database"},
+        503: {"description": "Duo service unavailable"}
+    }
+)
+async def check_duo_enrollment(email: str) -> DuoEnrollmentResponse:
+    """
+    Check Duo enrollment status for a user.
+
+    This endpoint helps administrators:
+    - Check if a user is enrolled in Duo
+    - See how many devices they have registered
+    - Get enrollment instructions if they need to enroll
+
+    Args:
+        email: User's email address
+
+    Returns:
+        DuoEnrollmentResponse with enrollment details
+
+    Raises:
+        HTTPException: If user not found or Duo service unavailable
+    """
+    logger.info(f"Checking Duo enrollment for user: {email}")
+
+    # First check if user exists in local database
+    db_adapter = get_database_adapter()
+    async for session in db_adapter.get_session():
+        try:
+            result = await session.execute(
+                select(User).where(User.email == email)
+            )
+            user = result.scalar_one_or_none()
+
+            if not user:
+                logger.warning(f"User not found in database: {email}")
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"User with email '{email}' not found in database"
+                )
+
+            # Check Duo enrollment if MFA is enabled
+            if not settings.enable_mfa:
+                return DuoEnrollmentResponse(
+                    user_email=email,
+                    duo_enrolled=False,
+                    duo_result="mfa_disabled",
+                    duo_status="MFA is disabled in application settings",
+                    devices_count=0,
+                    devices=[],
+                    enrollment_url=None,
+                    instructions="MFA is currently disabled. Enable it in application settings to use Duo Security."
+                )
+
+            # Get Duo enrollment status
+            try:
+                duo_service = get_duo_service()
+                user_status = await duo_service.check_user_status(email)
+
+                duo_result = user_status.get('result')
+                duo_status = user_status.get('status', '')
+                devices = user_status.get('devices', [])
+                devices_count = len(devices)
+                enrolled = user_status.get('enrolled', False)
+
+                # Generate instructions based on status
+                if duo_result == "enroll":
+                    instructions = (
+                        "User needs to enroll a device in Duo Security:\n"
+                        "1. Install Duo Mobile app on their smartphone\n"
+                        "2. Access the Duo enrollment portal\n"
+                        "3. Scan the QR code to register their device\n"
+                        "4. Complete the enrollment process\n"
+                        "5. Once enrolled, they can log in with Duo Push"
+                    )
+                    enrollment_url = f"https://{settings.duo_auth_host}/portal"
+                elif duo_result == "auth":
+                    instructions = f"User is fully enrolled with {devices_count} device(s). They can log in with Duo Push."
+                    enrollment_url = None
+                elif duo_result == "allow":
+                    instructions = "User has Duo bypass enabled. They can log in without MFA."
+                    enrollment_url = None
+                elif duo_result == "deny":
+                    instructions = "User is denied by Duo security policy. Check Duo admin panel for details."
+                    enrollment_url = None
+                else:
+                    instructions = f"User not found in Duo. Add them to Duo Security first."
+                    enrollment_url = f"https://{settings.duo_auth_host}/admin"
+
+                logger.info(f"Duo status for {email}: result={duo_result}, enrolled={enrolled}, devices={devices_count}")
+
+                return DuoEnrollmentResponse(
+                    user_email=email,
+                    duo_enrolled=enrolled,
+                    duo_result=duo_result,
+                    duo_status=duo_status,
+                    devices_count=devices_count,
+                    devices=devices,
+                    enrollment_url=enrollment_url,
+                    instructions=instructions
+                )
+
+            except Exception as e:
+                logger.error(f"Error checking Duo status for {email}: {str(e)}", exc_info=True)
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=f"Duo Security service unavailable: {str(e)}"
+                )
+
         finally:
             break
