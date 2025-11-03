@@ -202,14 +202,12 @@ async def login(
 
                     logger.info(f"Duo enrollment check for user {user.id} ({user.email}): enrolled={user_status.get('enrolled')}, result={duo_result}, status={duo_status}")
 
+                    # Store Duo enrollment status for later use
+                    duo_enrolled = duo_result == "auth"
+
                     # Handle different Duo enrollment states
-                    if duo_result == "enroll":
-                        logger.warning(f"User {user.id} ({user.email}) needs to enroll a device in Duo - blocking login")
-                        raise HTTPException(
-                            status_code=status.HTTP_403_FORBIDDEN,
-                            detail="Your account requires multi-factor authentication (MFA) but you have not enrolled a device in Duo Security yet. Please contact your administrator to complete device enrollment (install Duo Mobile app and register your device) before you can log in."
-                        )
-                    elif duo_result == "deny":
+                    if duo_result == "deny":
+                        # Only block if explicitly denied by policy
                         logger.warning(f"User {user.id} ({user.email}) denied by Duo policy - blocking login")
                         raise HTTPException(
                             status_code=status.HTTP_403_FORBIDDEN,
@@ -219,21 +217,18 @@ async def login(
                         # Duo bypass is enabled for this user - allow login without push
                         logger.info(f"User {user.id} ({user.email}) has Duo bypass enabled - skipping MFA")
                         # Fall through to normal login without MFA
-                    elif duo_result != "auth":
-                        # User not enrolled or unknown result
-                        logger.warning(f"User {user.id} ({user.email}) not enrolled in Duo (result={duo_result}) - blocking login")
-                        raise HTTPException(
-                            status_code=status.HTTP_403_FORBIDDEN,
-                            detail="Your account requires multi-factor authentication (MFA) but you are not enrolled in Duo Security. Please contact your administrator to complete Duo registration before you can log in."
-                        )
-                    else:
-                        # duo_result == "auth" - user is fully enrolled
-                        # Get available MFA methods from Duo devices
-                        devices = user_status.get('devices', [])
+                    elif duo_result == "enroll" or duo_result != "auth":
+                        # User not enrolled - show MFA options but note they're not enrolled
+                        logger.info(f"User {user.id} ({user.email}) not enrolled in Duo (result={duo_result}) - allowing login with MFA selection")
+                        duo_enrolled = False
+                        # Don't block - let them see MFA options
 
-                        # Build list of available MFA methods
-                        available_methods = []
+                    # Build list of available MFA methods
+                    available_methods = []
+                    devices = user_status.get('devices', [])
 
+                    if duo_enrolled:
+                        # User is fully enrolled in Duo - check device capabilities
                         # Check if user has devices that support push
                         has_push = any(
                             'push' in device.get('capabilities', [])
@@ -249,38 +244,38 @@ async def login(
                         )
                         if has_phone:
                             available_methods.append("duo_phone")
+                    else:
+                        # User not enrolled - still show Duo Push option
+                        # But will check enrollment when they actually select it
+                        available_methods.append("duo_push")
 
-                        # Check if user has device for SMS
-                        has_sms = any(
-                            'sms' in device.get('capabilities', [])
-                            for device in devices
-                        )
-                        if has_sms:
-                            available_methods.append("duo_sms")
+                    # SMS and Email OTP are always available as fallback methods
+                    # These work independently of Duo device enrollment
+                    available_methods.append("duo_sms")
+                    available_methods.append("email_otp")
 
-                        # Email OTP is always available
-                        available_methods.append("email_otp")
+                    # Store MFA data with duo_identifier, enrollment status, and available methods
+                    mfa_data["duo_identifier"] = duo_identifier
+                    mfa_data["duo_enrolled"] = duo_enrolled
+                    mfa_data["duo_result"] = duo_result
+                    mfa_data["available_methods"] = available_methods
+                    mfa_data["mfa_pending"] = True
+                    await redis_client.setex(
+                        f"mfa_token:{mfa_token}",
+                        300,
+                        json.dumps(mfa_data)
+                    )
 
-                        # Store MFA data with duo_identifier and available methods
-                        mfa_data["duo_identifier"] = duo_identifier
-                        mfa_data["available_methods"] = available_methods
-                        mfa_data["mfa_pending"] = True
-                        await redis_client.setex(
-                            f"mfa_token:{mfa_token}",
-                            300,
-                            json.dumps(mfa_data)
-                        )
+                    logger.info(f"MFA required for user {user.id}, duo_enrolled={duo_enrolled}, available methods: {available_methods}")
 
-                        logger.info(f"MFA required for user {user.id}, available methods: {available_methods}")
-
-                        # Return MFA required response with available methods
-                        return LoginResponse(
-                            token_type="bearer",
-                            requires_mfa=True,
-                            mfa_token=mfa_token,
-                            mfa_method="selection",  # Indicates user needs to select
-                            available_mfa_methods=available_methods
-                        )
+                    # Return MFA required response with available methods
+                    return LoginResponse(
+                        token_type="bearer",
+                        requires_mfa=True,
+                        mfa_token=mfa_token,
+                        mfa_method="selection",  # Indicates user needs to select
+                        available_mfa_methods=available_methods
+                    )
 
                 except HTTPException:
                     # Re-raise HTTP exceptions (like enrollment required)
@@ -397,6 +392,18 @@ async def trigger_mfa(
 
     try:
         if request.method == "duo_push":
+            # Check if user is enrolled in Duo first
+            duo_enrolled = mfa_data.get("duo_enrolled", False)
+            duo_result = mfa_data.get("duo_result")
+
+            if not duo_enrolled:
+                # User not enrolled in Duo - show friendly message
+                logger.warning(f"User attempted Duo Push but is not enrolled. Result: {duo_result}")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="You are not registered in Duo Security yet. Please contact your administrator to complete Duo enrollment (install Duo Mobile app and register your device) before using Duo Push authentication."
+                )
+
             # Send Duo Push
             duo_service = get_duo_service()
             push_result = await duo_service.send_push_notification(

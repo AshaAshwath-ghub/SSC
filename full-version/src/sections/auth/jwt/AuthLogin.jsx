@@ -141,7 +141,16 @@ export default function AuthLogin({ isDemo = false }) {
     } catch (error) {
       console.error('MFA trigger error:', error);
       setMfaStatus('error');
-      setMfaMessage(error.message || 'Failed to send authentication request. Please try again.');
+
+      // Extract error message from response
+      let errorMessage = 'Failed to send authentication request. Please try again.';
+      if (error.response?.data?.detail) {
+        errorMessage = error.response.data.detail;
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+
+      setMfaMessage(errorMessage);
     }
   };
 
@@ -645,21 +654,39 @@ export default function AuthLogin({ isDemo = false }) {
           <Alert severity="error" sx={{ mb: 2 }}>
             {mfaMessage}
           </Alert>
-          <Button
-            fullWidth
-            variant="contained"
-            onClick={() => {
-              setMfaStatus(null);
-              setMfaToken(null);
-              setMfaMessage('');
-              setSubmittedOtp(null);
-              setOtpCode('');
-              setOtpBoxes(['', '', '', '', '', '', '']);
-              setOtpError('');
-            }}
-          >
-            Try Again
-          </Button>
+          <Stack spacing={2}>
+            <Button
+              fullWidth
+              variant="contained"
+              onClick={() => {
+                setMfaStatus('selection');
+                setMfaMessage('');
+                setSubmittedOtp(null);
+                setOtpCode('');
+                setOtpBoxes(['', '', '', '', '', '', '']);
+                setOtpError('');
+                setSelectedMethod(null);
+              }}
+            >
+              Choose Different Method
+            </Button>
+            <Button
+              fullWidth
+              variant="outlined"
+              onClick={() => {
+                setMfaStatus(null);
+                setMfaToken(null);
+                setMfaMessage('');
+                setSubmittedOtp(null);
+                setOtpCode('');
+                setOtpBoxes(['', '', '', '', '', '', '']);
+                setOtpError('');
+                setSelectedMethod(null);
+              }}
+            >
+              Back to Login
+            </Button>
+          </Stack>
         </Box>
       ) : (
         // Show normal login form
