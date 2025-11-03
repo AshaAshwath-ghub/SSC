@@ -35,16 +35,25 @@ import { fetcher } from 'utils/axios';
 import EyeOutlined from '@ant-design/icons/EyeOutlined';
 import EyeInvisibleOutlined from '@ant-design/icons/EyeInvisibleOutlined';
 import MobileOutlined from '@ant-design/icons/MobileOutlined';
+import PhoneOutlined from '@ant-design/icons/PhoneOutlined';
+import MessageOutlined from '@ant-design/icons/MessageOutlined';
+import MailOutlined from '@ant-design/icons/MailOutlined';
 
 // ============================|| JWT - LOGIN ||============================ //
 
 export default function AuthLogin({ isDemo = false }) {
   const [checked, setChecked] = React.useState(false);
-  const [mfaStatus, setMfaStatus] = React.useState(null); // 'pending', 'approved', 'denied', 'error', 'selection'
+  const [mfaStatus, setMfaStatus] = React.useState(null); // 'pending', 'approved', 'denied', 'error', 'selection', 'otp_input'
   const [mfaToken, setMfaToken] = React.useState(null);
   const [mfaMessage, setMfaMessage] = React.useState('');
   const [availableMfaMethods, setAvailableMfaMethods] = React.useState([]);
   const [selectedMethod, setSelectedMethod] = React.useState(null);
+  const [otpCode, setOtpCode] = React.useState('');
+  const [otpError, setOtpError] = React.useState('');
+  const [isVerifying, setIsVerifying] = React.useState(false);
+  const [submittedOtp, setSubmittedOtp] = React.useState(null); // Store submitted OTP for polling
+  const [otpBoxes, setOtpBoxes] = React.useState(['', '', '', '', '', '', '']); // 7 boxes for OTP
+  const otpInputRefs = useRef([]);
   const pollingInterval = useRef(null);
 
   const { login, verifyMFA } = useAuth();
@@ -66,10 +75,20 @@ export default function AuthLogin({ isDemo = false }) {
     try {
       console.log('Triggering MFA method:', method, 'with token:', mfaToken);
 
-      // IMMEDIATELY show the waiting screen
       setSelectedMethod(method);
-      setMfaStatus('pending');
-      setMfaMessage('Sending authentication request...');
+
+      // Check if this is an OTP-based method
+      const isOtpMethod = method === 'duo_sms' || method === 'email_otp';
+
+      if (isOtpMethod) {
+        // For OTP methods, show sending status temporarily
+        setMfaStatus('pending');
+        setMfaMessage('Sending verification code...');
+      } else {
+        // For push methods, show waiting screen
+        setMfaStatus('pending');
+        setMfaMessage('Sending authentication request...');
+      }
 
       const apiUrl = (import.meta.env.VITE_APP_API_URL || 'http://localhost:3010').replace(/\/$/, '');
       const url = `${apiUrl}/api/v1/auth/mfa/trigger`;
@@ -94,20 +113,30 @@ export default function AuthLogin({ isDemo = false }) {
         throw new Error(data.detail || 'Failed to trigger MFA method');
       }
 
-      // Update message with server response
       console.log('MFA triggered successfully');
-      setMfaMessage(data.message || 'Please check your device for authentication request.');
 
-      // Start polling for MFA status after a short delay
-      setTimeout(() => {
-        console.log('Starting MFA polling...');
-        pollingInterval.current = setInterval(() => {
+      if (isOtpMethod) {
+        // For OTP methods, show input screen
+        setMfaStatus('otp_input');
+        setMfaMessage(data.message || 'Enter the verification code sent to you.');
+        setOtpCode('');
+        setOtpBoxes(['', '', '', '', '', '', '']);
+        setOtpError('');
+      } else {
+        // For push methods, update message and start polling
+        setMfaMessage(data.message || 'Please check your device for authentication request.');
+
+        // Start polling for MFA status after a short delay
+        setTimeout(() => {
+          console.log('Starting MFA polling...');
+          pollingInterval.current = setInterval(() => {
+            pollMFAStatus(mfaToken);
+          }, 3000);
+
+          // Do initial poll
           pollMFAStatus(mfaToken);
-        }, 3000);
-
-        // Do initial poll
-        pollMFAStatus(mfaToken);
-      }, 2000);
+        }, 2000);
+      }
 
     } catch (error) {
       console.error('MFA trigger error:', error);
@@ -117,37 +146,213 @@ export default function AuthLogin({ isDemo = false }) {
   };
 
   // Poll MFA status
-  const pollMFAStatus = async (token) => {
+  const pollMFAStatus = async (token, passcode = null) => {
     try {
-      console.log('Polling MFA status...');
-      const result = await verifyMFA(token);
-      console.log('Poll result:', result);
+      console.log('========== POLLING MFA STATUS ==========');
+      console.log('Token:', token);
+      console.log('Passcode:', passcode);
+      console.log('Selected Method:', selectedMethod);
+
+      const result = await verifyMFA(token, passcode);
+
+      console.log('========== POLL RESULT ==========');
+      console.log('Full result:', JSON.stringify(result, null, 2));
+      console.log('Status value:', result.status);
+      console.log('Status type:', typeof result.status);
+      console.log('Has access_token:', !!result.access_token);
+      console.log('Has user:', !!result.user);
+      console.log('=====================================');
 
       if (result.status === 'approved') {
         // Login successful
+        console.log('✓ LOGIN APPROVED!');
         setMfaStatus('approved');
         setMfaMessage('Login successful! Redirecting...');
         clearInterval(pollingInterval.current);
+        setSubmittedOtp(null); // Clear stored OTP
         preload('api/menu/dashboard', fetcher);
       } else if (result.status === 'denied') {
-        // User denied the push
+        // User denied the push or invalid OTP
+        console.log('✗ LOGIN DENIED');
         setMfaStatus('denied');
-        setMfaMessage('Authentication denied. Please try again.');
+        const isOtpMethod = selectedMethod === 'duo_sms' || selectedMethod === 'email_otp';
+        setMfaMessage(isOtpMethod ? 'Invalid verification code.' : 'Authentication denied. Please try again.');
         clearInterval(pollingInterval.current);
+        setSubmittedOtp(null); // Clear stored OTP
       } else if (result.status === 'error') {
         // Error occurred
+        console.log('✗ ERROR STATUS');
         setMfaStatus('error');
         setMfaMessage(result.message || 'An error occurred. Please try again.');
         clearInterval(pollingInterval.current);
+        setSubmittedOtp(null); // Clear stored OTP
       } else {
-        // Still pending
-        setMfaMessage('Waiting for approval on your mobile device...');
+        // Still pending - show appropriate message based on method
+        console.log('⏳ Still pending, status:', result.status);
+        const isOtpMethod = selectedMethod === 'duo_sms' || selectedMethod === 'email_otp';
+        if (isOtpMethod) {
+          setMfaMessage('Verifying your code...');
+        } else {
+          setMfaMessage('Waiting for approval on your mobile device...');
+        }
       }
     } catch (error) {
-      console.error('MFA polling error:', error);
+      console.error('========== MFA POLLING ERROR ==========');
+      console.error('Error:', error);
+      console.error('Error response:', error.response?.data);
+      console.error('=======================================');
       setMfaStatus('error');
       setMfaMessage('An error occurred. Please try again.');
       clearInterval(pollingInterval.current);
+      setSubmittedOtp(null); // Clear stored OTP
+    }
+  };
+
+  // Handle OTP verification
+  const handleOtpVerification = async () => {
+    try {
+      setIsVerifying(true);
+      setOtpError('');
+
+      // Validate OTP code
+      if (!otpCode || otpCode.trim().length === 0) {
+        setOtpError('Please enter the verification code');
+        setIsVerifying(false);
+        return;
+      }
+
+      console.log('========== SUBMITTING OTP ==========');
+      console.log('OTP Code:', otpCode);
+      console.log('MFA Token:', mfaToken);
+      console.log('Selected Method:', selectedMethod);
+
+      // Submit the OTP code
+      const apiUrl = (import.meta.env.VITE_APP_API_URL || 'http://localhost:3010').replace(/\/$/, '');
+      const url = `${apiUrl}/api/v1/auth/mfa/verify`;
+      console.log('Calling URL:', url);
+
+      const requestBody = {
+        mfa_token: mfaToken,
+        passcode: otpCode.trim()
+      };
+      console.log('Request body:', JSON.stringify(requestBody, null, 2));
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(requestBody)
+      });
+
+      console.log('Response status:', response.status);
+      console.log('Response ok:', response.ok);
+
+      const data = await response.json();
+      console.log('========== OTP SUBMISSION RESPONSE ==========');
+      console.log('Full response:', JSON.stringify(data, null, 2));
+      console.log('Status:', data.status);
+      console.log('Message:', data.message);
+      console.log('Has access_token:', !!data.access_token);
+      console.log('Has user:', !!data.user);
+      console.log('==========================================');
+
+      if (!response.ok) {
+        throw new Error(data.detail || data.message || 'Failed to verify OTP');
+      }
+
+      // Check immediate response
+      if (data.status === 'approved' || data.status === 'success') {
+        // Login successful immediately
+        setMfaStatus('approved');
+        setMfaMessage('Login successful! Redirecting...');
+        preload('api/menu/dashboard', fetcher);
+      } else if (data.status === 'denied' || data.status === 'invalid' || data.status === 'failed') {
+        // Invalid OTP
+        setOtpError(data.message || 'Invalid verification code. Please try again.');
+        setOtpCode('');
+        setOtpBoxes(['', '', '', '', '', '', '']);
+        setIsVerifying(false);
+        // Focus first box for retry
+        setTimeout(() => otpInputRefs.current[0]?.focus(), 100);
+      } else if (data.status === 'pending' || data.status === 'waiting') {
+        // OTP submitted successfully, now poll for verification
+        console.log('OTP submitted, starting polling...');
+        const submittedCode = otpCode.trim();
+        setSubmittedOtp(submittedCode); // Store the OTP for polling
+        setMfaStatus('pending');
+        setMfaMessage('Verifying your code...');
+
+        // Start polling after submitting OTP - pass the OTP code
+        setTimeout(() => {
+          pollingInterval.current = setInterval(() => {
+            pollMFAStatus(mfaToken, submittedCode);
+          }, 2000); // Poll every 2 seconds for faster response
+
+          // Do initial poll immediately with OTP
+          pollMFAStatus(mfaToken, submittedCode);
+        }, 1000);
+      } else {
+        // Unknown status
+        console.error('Unknown status received:', data.status);
+        console.error('Full response:', data);
+        setOtpError(`Unexpected response status: ${data.status}. Please try again.`);
+        setIsVerifying(false);
+      }
+    } catch (error) {
+      console.error('OTP verification error:', error);
+      console.error('Error response:', error.response);
+      setOtpError(error.response?.data?.detail || error.message || 'Verification failed. Please try again.');
+      setIsVerifying(false);
+    }
+  };
+
+  // Handle OTP box input
+  const handleOtpBoxChange = (index, value) => {
+    // Only allow digits
+    if (value && !/^\d$/.test(value)) {
+      return;
+    }
+
+    const newBoxes = [...otpBoxes];
+    newBoxes[index] = value;
+    setOtpBoxes(newBoxes);
+    setOtpError('');
+
+    // Update combined OTP code
+    const combinedCode = newBoxes.join('');
+    setOtpCode(combinedCode);
+
+    // Auto-focus next box
+    if (value && index < 6) {
+      otpInputRefs.current[index + 1]?.focus();
+    }
+  };
+
+  // Handle backspace in OTP boxes
+  const handleOtpBoxKeyDown = (index, e) => {
+    if (e.key === 'Backspace' && !otpBoxes[index] && index > 0) {
+      // Move to previous box on backspace if current is empty
+      otpInputRefs.current[index - 1]?.focus();
+    } else if (e.key === 'Enter' && otpBoxes.join('').length === 7) {
+      // Submit on Enter if all boxes filled
+      handleOtpVerification();
+    }
+  };
+
+  // Handle paste in OTP boxes
+  const handleOtpBoxPaste = (e) => {
+    e.preventDefault();
+    const pastedData = e.clipboardData.getData('text').trim();
+
+    // Only allow 7 digits
+    if (/^\d{7}$/.test(pastedData)) {
+      const newBoxes = pastedData.split('');
+      setOtpBoxes(newBoxes);
+      setOtpCode(pastedData);
+      setOtpError('');
+      // Focus last box
+      otpInputRefs.current[6]?.focus();
     }
   };
 
@@ -165,7 +370,100 @@ export default function AuthLogin({ isDemo = false }) {
 
   return (
     <>
-      {mfaStatus === 'selection' && mfaToken ? (
+      {mfaStatus === 'otp_input' && mfaToken ? (
+        // Show OTP input screen
+        <Box sx={{ py: 2 }}>
+          <Typography variant="h4" gutterBottom>
+            Enter Verification Code
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+            {mfaMessage}
+          </Typography>
+
+          <Stack spacing={2}>
+            <Stack sx={{ gap: 1 }}>
+              <InputLabel>Verification Code</InputLabel>
+              <Box
+                sx={{
+                  display: 'flex',
+                  gap: 1,
+                  justifyContent: 'center',
+                  mb: 1
+                }}
+              >
+                {otpBoxes.map((digit, index) => (
+                  <OutlinedInput
+                    key={index}
+                    inputRef={(el) => (otpInputRefs.current[index] = el)}
+                    value={digit}
+                    onChange={(e) => handleOtpBoxChange(index, e.target.value)}
+                    onKeyDown={(e) => handleOtpBoxKeyDown(index, e)}
+                    onPaste={handleOtpBoxPaste}
+                    disabled={isVerifying}
+                    autoFocus={index === 0}
+                    error={Boolean(otpError)}
+                    inputProps={{
+                      maxLength: 1,
+                      style: {
+                        textAlign: 'center',
+                        fontSize: '1.25rem',
+                        fontWeight: 'bold',
+                        padding: '8px',
+                        width: '32px',
+                        height: '32px'
+                      }
+                    }}
+                    sx={{
+                      width: '48px',
+                      '& input': {
+                        padding: '8px'
+                      }
+                    }}
+                  />
+                ))}
+              </Box>
+              {otpError && (
+                <FormHelperText error sx={{ textAlign: 'center' }}>{otpError}</FormHelperText>
+              )}
+            </Stack>
+
+            <AnimateButton>
+              <Button
+                fullWidth
+                size="large"
+                variant="contained"
+                onClick={handleOtpVerification}
+                disabled={isVerifying || otpCode.length !== 7}
+              >
+                {isVerifying ? (
+                  <>
+                    <CircularProgress size={20} sx={{ mr: 1 }} color="inherit" />
+                    Verifying...
+                  </>
+                ) : (
+                  'Verify Code'
+                )}
+              </Button>
+            </AnimateButton>
+
+            <Button
+              variant="text"
+              onClick={() => {
+                setMfaStatus('selection');
+                setSelectedMethod(null);
+                setOtpCode('');
+                setOtpBoxes(['', '', '', '', '', '', '']);
+                setOtpError('');
+                setSubmittedOtp(null);
+              }}
+              disabled={isVerifying}
+              sx={{ mt: 1 }}
+            >
+              Choose Different Method
+            </Button>
+          </Stack>
+        </Box>
+      ) : mfaStatus === 'selection' && mfaToken ? (
         // Show MFA method selection screen
         <Box sx={{ py: 2 }}>
           <Typography variant="h4" gutterBottom>
@@ -200,7 +498,7 @@ export default function AuthLogin({ isDemo = false }) {
                 variant="outlined"
                 size="large"
                 onClick={() => triggerMfaMethod('duo_phone')}
-                startIcon={<MobileOutlined />}
+                startIcon={<PhoneOutlined />}
                 sx={{ justifyContent: 'flex-start', py: 2, textAlign: 'left' }}
               >
                 <Box>
@@ -218,11 +516,27 @@ export default function AuthLogin({ isDemo = false }) {
                 variant="outlined"
                 size="large"
                 onClick={() => triggerMfaMethod('duo_sms')}
-                startIcon={<MobileOutlined />}
+                startIcon={<MessageOutlined />}
                 sx={{ justifyContent: 'flex-start', py: 2, textAlign: 'left' }}
               >
                 <Box>
-                  <Typography variant="subtitle1">SMS Passcode</Typography>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Typography variant="subtitle1">SMS Passcode</Typography>
+                    <Typography
+                      variant="caption"
+                      sx={{
+                        bgcolor: 'warning.lighter',
+                        color: 'warning.dark',
+                        px: 1,
+                        py: 0.25,
+                        borderRadius: 0.5,
+                        fontWeight: 600,
+                        fontSize: '0.7rem'
+                      }}
+                    >
+                      Coming Soon
+                    </Typography>
+                  </Box>
                   <Typography variant="caption" color="text.secondary">
                     Get a one-time code via text message
                   </Typography>
@@ -236,11 +550,27 @@ export default function AuthLogin({ isDemo = false }) {
                 variant="outlined"
                 size="large"
                 onClick={() => triggerMfaMethod('email_otp')}
-                startIcon={<MobileOutlined />}
+                startIcon={<MailOutlined />}
                 sx={{ justifyContent: 'flex-start', py: 2, textAlign: 'left' }}
               >
                 <Box>
-                  <Typography variant="subtitle1">Email Verification Code</Typography>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Typography variant="subtitle1">Email Verification Code</Typography>
+                    <Typography
+                      variant="caption"
+                      sx={{
+                        bgcolor: 'warning.lighter',
+                        color: 'warning.dark',
+                        px: 1,
+                        py: 0.25,
+                        borderRadius: 0.5,
+                        fontWeight: 600,
+                        fontSize: '0.7rem'
+                      }}
+                    >
+                      Coming Soon
+                    </Typography>
+                  </Box>
                   <Typography variant="caption" color="text.secondary">
                     Get a one-time code via email
                   </Typography>
@@ -255,6 +585,10 @@ export default function AuthLogin({ isDemo = false }) {
               setMfaStatus(null);
               setMfaToken(null);
               setAvailableMfaMethods([]);
+              setSubmittedOtp(null);
+              setOtpCode('');
+              setOtpBoxes(['', '', '', '', '', '', '']);
+              setOtpError('');
             }}
             sx={{ mt: 3, display: 'block', mx: 'auto' }}
           >
@@ -264,9 +598,29 @@ export default function AuthLogin({ isDemo = false }) {
       ) : mfaStatus === 'pending' && mfaToken ? (
         // Show authentication waiting screen
         <Box sx={{ textAlign: 'center', py: 4 }}>
-          <MobileOutlined style={{ fontSize: 64, color: '#1890ff', marginBottom: 16 }} />
+          {selectedMethod === 'duo_push' && (
+            <MobileOutlined style={{ fontSize: 64, color: '#1890ff', marginBottom: 16 }} />
+          )}
+          {selectedMethod === 'duo_phone' && (
+            <PhoneOutlined style={{ fontSize: 64, color: '#1890ff', marginBottom: 16 }} />
+          )}
+          {selectedMethod === 'duo_sms' && (
+            <MessageOutlined style={{ fontSize: 64, color: '#1890ff', marginBottom: 16 }} />
+          )}
+          {selectedMethod === 'email_otp' && (
+            <MailOutlined style={{ fontSize: 64, color: '#1890ff', marginBottom: 16 }} />
+          )}
+          {!selectedMethod && (
+            <MobileOutlined style={{ fontSize: 64, color: '#1890ff', marginBottom: 16 }} />
+          )}
           <Typography variant="h3" gutterBottom>
-            {selectedMethod === 'duo_push' ? 'Duo Push Sent' : 'Authentication Requested'}
+            {selectedMethod === 'duo_push'
+              ? 'Duo Push Sent'
+              : selectedMethod === 'duo_phone'
+                ? 'Calling Your Phone'
+                : (selectedMethod === 'duo_sms' || selectedMethod === 'email_otp')
+                  ? 'Verifying Code'
+                  : 'Authentication Requested'}
           </Typography>
           <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
             {mfaMessage}
@@ -278,6 +632,7 @@ export default function AuthLogin({ isDemo = false }) {
               clearInterval(pollingInterval.current);
               setMfaStatus('selection');
               setSelectedMethod(null);
+              setSubmittedOtp(null);
             }}
             sx={{ mt: 3, display: 'block', mx: 'auto' }}
           >
@@ -297,6 +652,10 @@ export default function AuthLogin({ isDemo = false }) {
               setMfaStatus(null);
               setMfaToken(null);
               setMfaMessage('');
+              setSubmittedOtp(null);
+              setOtpCode('');
+              setOtpBoxes(['', '', '', '', '', '', '']);
+              setOtpError('');
             }}
           >
             Try Again
