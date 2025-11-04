@@ -117,6 +117,11 @@ class Settings(BaseSettings):
     duo_admin_skey: str = Field(default="", alias="DUO_ADMIN_SKEY")
     duo_admin_host: str = Field(default="", alias="DUO_ADMIN_HOST")
 
+    # SendGrid Configuration (for Email OTP)
+    sendgrid_api_key: str = Field(default="", alias="SENDGRID_API_KEY")
+    sendgrid_from_email: str = Field(default="noreply@yourdomain.com", alias="SENDGRID_FROM_EMAIL")
+    sendgrid_from_name: str = Field(default="Application", alias="SENDGRID_FROM_NAME")
+
     # Email Configuration
     smtp_host: str = Field(default="smtp.gmail.com", alias="SMTP_HOST")
     smtp_port: int = Field(default=587, alias="SMTP_PORT")

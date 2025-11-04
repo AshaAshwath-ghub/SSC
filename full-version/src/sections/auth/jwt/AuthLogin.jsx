@@ -52,7 +52,7 @@ export default function AuthLogin({ isDemo = false }) {
   const [otpError, setOtpError] = React.useState('');
   const [isVerifying, setIsVerifying] = React.useState(false);
   const [submittedOtp, setSubmittedOtp] = React.useState(null); // Store submitted OTP for polling
-  const [otpBoxes, setOtpBoxes] = React.useState(['', '', '', '', '', '', '']); // 7 boxes for OTP
+  const [otpBoxes, setOtpBoxes] = React.useState(['', '', '', '', '', '']); // 6 boxes for OTP
   const otpInputRefs = useRef([]);
   const pollingInterval = useRef(null);
 
@@ -78,7 +78,7 @@ export default function AuthLogin({ isDemo = false }) {
       setSelectedMethod(method);
 
       // Check if this is an OTP-based method
-      const isOtpMethod = method === 'duo_sms' || method === 'email_otp';
+      const isOtpMethod = method === 'duo_sms' || method === 'email_otp' || method === 'twilio_sms';
 
       if (isOtpMethod) {
         // For OTP methods, show sending status temporarily
@@ -120,7 +120,7 @@ export default function AuthLogin({ isDemo = false }) {
         setMfaStatus('otp_input');
         setMfaMessage(data.message || 'Enter the verification code sent to you.');
         setOtpCode('');
-        setOtpBoxes(['', '', '', '', '', '', '']);
+        setOtpBoxes(['', '', '', '', '', '']);
         setOtpError('');
       } else {
         // For push methods, update message and start polling
@@ -173,18 +173,21 @@ export default function AuthLogin({ isDemo = false }) {
       console.log('=====================================');
 
       if (result.status === 'approved') {
-        // Login successful
-        console.log('✓ LOGIN APPROVED!');
+        // Login successful - verifyMFA already handled token storage and dispatch
+        console.log('✅ LOGIN APPROVED!');
+        console.log('User:', result.user);
+
         setMfaStatus('approved');
         setMfaMessage('Login successful! Redirecting...');
         clearInterval(pollingInterval.current);
         setSubmittedOtp(null); // Clear stored OTP
         preload('api/menu/dashboard', fetcher);
+        // verifyMFA already logged the user in, no need to do anything else
       } else if (result.status === 'denied') {
         // User denied the push or invalid OTP
         console.log('✗ LOGIN DENIED');
         setMfaStatus('denied');
-        const isOtpMethod = selectedMethod === 'duo_sms' || selectedMethod === 'email_otp';
+        const isOtpMethod = selectedMethod === 'duo_sms' || selectedMethod === 'email_otp' || selectedMethod === 'twilio_sms';
         setMfaMessage(isOtpMethod ? 'Invalid verification code.' : 'Authentication denied. Please try again.');
         clearInterval(pollingInterval.current);
         setSubmittedOtp(null); // Clear stored OTP
@@ -235,56 +238,34 @@ export default function AuthLogin({ isDemo = false }) {
       console.log('MFA Token:', mfaToken);
       console.log('Selected Method:', selectedMethod);
 
-      // Submit the OTP code
-      const apiUrl = (import.meta.env.VITE_APP_API_URL || 'http://localhost:3010').replace(/\/$/, '');
-      const url = `${apiUrl}/api/v1/auth/mfa/verify`;
-      console.log('Calling URL:', url);
+      // Use verifyMFA from context - it handles token storage and login automatically
+      const result = await verifyMFA(mfaToken, otpCode.trim());
 
-      const requestBody = {
-        mfa_token: mfaToken,
-        passcode: otpCode.trim()
-      };
-      console.log('Request body:', JSON.stringify(requestBody, null, 2));
-
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(requestBody)
-      });
-
-      console.log('Response status:', response.status);
-      console.log('Response ok:', response.ok);
-
-      const data = await response.json();
       console.log('========== OTP SUBMISSION RESPONSE ==========');
-      console.log('Full response:', JSON.stringify(data, null, 2));
-      console.log('Status:', data.status);
-      console.log('Message:', data.message);
-      console.log('Has access_token:', !!data.access_token);
-      console.log('Has user:', !!data.user);
+      console.log('Full response:', JSON.stringify(result, null, 2));
+      console.log('Status:', result.status);
+      console.log('Message:', result.message);
       console.log('==========================================');
 
-      if (!response.ok) {
-        throw new Error(data.detail || data.message || 'Failed to verify OTP');
-      }
-
       // Check immediate response
-      if (data.status === 'approved' || data.status === 'success') {
-        // Login successful immediately
+      if (result.status === 'approved' || result.status === 'success') {
+        // Login successful - verifyMFA already handled token storage and dispatch
+        console.log('✅ MFA Verification SUCCESS!');
+        console.log('User:', result.user);
+
         setMfaStatus('approved');
         setMfaMessage('Login successful! Redirecting...');
         preload('api/menu/dashboard', fetcher);
-      } else if (data.status === 'denied' || data.status === 'invalid' || data.status === 'failed') {
+        // verifyMFA already logged the user in, no need to do anything else
+      } else if (result.status === 'denied' || result.status === 'invalid' || result.status === 'failed') {
         // Invalid OTP
-        setOtpError(data.message || 'Invalid verification code. Please try again.');
+        setOtpError(result.message || 'Invalid verification code. Please try again.');
         setOtpCode('');
-        setOtpBoxes(['', '', '', '', '', '', '']);
+        setOtpBoxes(['', '', '', '', '', '']);
         setIsVerifying(false);
         // Focus first box for retry
         setTimeout(() => otpInputRefs.current[0]?.focus(), 100);
-      } else if (data.status === 'pending' || data.status === 'waiting') {
+      } else if (result.status === 'pending' || result.status === 'waiting') {
         // OTP submitted successfully, now poll for verification
         console.log('OTP submitted, starting polling...');
         const submittedCode = otpCode.trim();
@@ -303,9 +284,9 @@ export default function AuthLogin({ isDemo = false }) {
         }, 1000);
       } else {
         // Unknown status
-        console.error('Unknown status received:', data.status);
-        console.error('Full response:', data);
-        setOtpError(`Unexpected response status: ${data.status}. Please try again.`);
+        console.error('Unknown status received:', result.status);
+        console.error('Full response:', result);
+        setOtpError(`Unexpected response status: ${result.status}. Please try again.`);
         setIsVerifying(false);
       }
     } catch (error) {
@@ -318,13 +299,13 @@ export default function AuthLogin({ isDemo = false }) {
 
   // Handle OTP box input
   const handleOtpBoxChange = (index, value) => {
-    // Only allow digits
-    if (value && !/^\d$/.test(value)) {
+    // Only allow hex characters (0-9, A-F)
+    if (value && !/^[0-9A-Fa-f]$/.test(value)) {
       return;
     }
 
     const newBoxes = [...otpBoxes];
-    newBoxes[index] = value;
+    newBoxes[index] = value.toUpperCase();
     setOtpBoxes(newBoxes);
     setOtpError('');
 
@@ -333,7 +314,7 @@ export default function AuthLogin({ isDemo = false }) {
     setOtpCode(combinedCode);
 
     // Auto-focus next box
-    if (value && index < 6) {
+    if (value && index < 5) {
       otpInputRefs.current[index + 1]?.focus();
     }
   };
@@ -343,7 +324,7 @@ export default function AuthLogin({ isDemo = false }) {
     if (e.key === 'Backspace' && !otpBoxes[index] && index > 0) {
       // Move to previous box on backspace if current is empty
       otpInputRefs.current[index - 1]?.focus();
-    } else if (e.key === 'Enter' && otpBoxes.join('').length === 7) {
+    } else if (e.key === 'Enter' && otpBoxes.join('').length === 6) {
       // Submit on Enter if all boxes filled
       handleOtpVerification();
     }
@@ -352,16 +333,16 @@ export default function AuthLogin({ isDemo = false }) {
   // Handle paste in OTP boxes
   const handleOtpBoxPaste = (e) => {
     e.preventDefault();
-    const pastedData = e.clipboardData.getData('text').trim();
+    const pastedData = e.clipboardData.getData('text').trim().toUpperCase();
 
-    // Only allow 7 digits
-    if (/^\d{7}$/.test(pastedData)) {
+    // Only allow 6 alphanumeric characters (hex)
+    if (/^[0-9A-F]{6}$/.test(pastedData)) {
       const newBoxes = pastedData.split('');
       setOtpBoxes(newBoxes);
       setOtpCode(pastedData);
       setOtpError('');
       // Focus last box
-      otpInputRefs.current[6]?.focus();
+      otpInputRefs.current[5]?.focus();
     }
   };
 
@@ -442,7 +423,7 @@ export default function AuthLogin({ isDemo = false }) {
                 size="large"
                 variant="contained"
                 onClick={handleOtpVerification}
-                disabled={isVerifying || otpCode.length !== 7}
+                disabled={isVerifying || otpCode.length !== 6}
               >
                 {isVerifying ? (
                   <>
@@ -461,7 +442,7 @@ export default function AuthLogin({ isDemo = false }) {
                 setMfaStatus('selection');
                 setSelectedMethod(null);
                 setOtpCode('');
-                setOtpBoxes(['', '', '', '', '', '', '']);
+                setOtpBoxes(['', '', '', '', '', '']);
                 setOtpError('');
                 setSubmittedOtp(null);
               }}
@@ -519,7 +500,8 @@ export default function AuthLogin({ isDemo = false }) {
               </Button>
             )}
 
-            {availableMfaMethods.includes('duo_sms') && (
+            {/* Hidden for now - SMS Passcode (Duo) */}
+            {/* {availableMfaMethods.includes('duo_sms') && (
               <Button
                 fullWidth
                 variant="outlined"
@@ -529,23 +511,25 @@ export default function AuthLogin({ isDemo = false }) {
                 sx={{ justifyContent: 'flex-start', py: 2, textAlign: 'left' }}
               >
                 <Box>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <Typography variant="subtitle1">SMS Passcode</Typography>
-                    <Typography
-                      variant="caption"
-                      sx={{
-                        bgcolor: 'warning.lighter',
-                        color: 'warning.dark',
-                        px: 1,
-                        py: 0.25,
-                        borderRadius: 0.5,
-                        fontWeight: 600,
-                        fontSize: '0.7rem'
-                      }}
-                    >
-                      Coming Soon
-                    </Typography>
-                  </Box>
+                  <Typography variant="subtitle1">SMS Passcode (Duo)</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Get a one-time code via text message (Duo Security)
+                  </Typography>
+                </Box>
+              </Button>
+            )} */}
+
+            {availableMfaMethods.includes('twilio_sms') && (
+              <Button
+                fullWidth
+                variant="outlined"
+                size="large"
+                onClick={() => triggerMfaMethod('twilio_sms')}
+                startIcon={<MessageOutlined />}
+                sx={{ justifyContent: 'flex-start', py: 2, textAlign: 'left' }}
+              >
+                <Box>
+                  <Typography variant="subtitle1">SMS Verification</Typography>
                   <Typography variant="caption" color="text.secondary">
                     Get a one-time code via text message
                   </Typography>
@@ -563,23 +547,7 @@ export default function AuthLogin({ isDemo = false }) {
                 sx={{ justifyContent: 'flex-start', py: 2, textAlign: 'left' }}
               >
                 <Box>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <Typography variant="subtitle1">Email Verification Code</Typography>
-                    <Typography
-                      variant="caption"
-                      sx={{
-                        bgcolor: 'warning.lighter',
-                        color: 'warning.dark',
-                        px: 1,
-                        py: 0.25,
-                        borderRadius: 0.5,
-                        fontWeight: 600,
-                        fontSize: '0.7rem'
-                      }}
-                    >
-                      Coming Soon
-                    </Typography>
-                  </Box>
+                  <Typography variant="subtitle1">Email Verification Code</Typography>
                   <Typography variant="caption" color="text.secondary">
                     Get a one-time code via email
                   </Typography>
@@ -596,7 +564,7 @@ export default function AuthLogin({ isDemo = false }) {
               setAvailableMfaMethods([]);
               setSubmittedOtp(null);
               setOtpCode('');
-              setOtpBoxes(['', '', '', '', '', '', '']);
+              setOtpBoxes(['', '', '', '', '', '']);
               setOtpError('');
             }}
             sx={{ mt: 3, display: 'block', mx: 'auto' }}
@@ -614,6 +582,9 @@ export default function AuthLogin({ isDemo = false }) {
             <PhoneOutlined style={{ fontSize: 64, color: '#1890ff', marginBottom: 16 }} />
           )}
           {selectedMethod === 'duo_sms' && (
+            <MessageOutlined style={{ fontSize: 64, color: '#1890ff', marginBottom: 16 }} />
+          )}
+          {selectedMethod === 'twilio_sms' && (
             <MessageOutlined style={{ fontSize: 64, color: '#1890ff', marginBottom: 16 }} />
           )}
           {selectedMethod === 'email_otp' && (
@@ -663,7 +634,7 @@ export default function AuthLogin({ isDemo = false }) {
                 setMfaMessage('');
                 setSubmittedOtp(null);
                 setOtpCode('');
-                setOtpBoxes(['', '', '', '', '', '', '']);
+                setOtpBoxes(['', '', '', '', '', '']);
                 setOtpError('');
                 setSelectedMethod(null);
               }}
@@ -679,7 +650,7 @@ export default function AuthLogin({ isDemo = false }) {
                 setMfaMessage('');
                 setSubmittedOtp(null);
                 setOtpCode('');
-                setOtpBoxes(['', '', '', '', '', '', '']);
+                setOtpBoxes(['', '', '', '', '', '']);
                 setOtpError('');
                 setSelectedMethod(null);
               }}

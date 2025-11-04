@@ -15,6 +15,8 @@ from app.core.config import settings
 from app.core.security import verify_password, create_access_token, create_refresh_token
 from app.core.logging import get_logger, request_id_ctx
 from app.core.duo_security import get_duo_service
+from app.core.sendgrid_service import get_sendgrid_service
+from app.core.twilio_service import get_twilio_service
 from app.db.adapters import get_database_adapter
 from app.db.models.user import User, Session as UserSession
 from app.schemas.auth import (
@@ -251,8 +253,9 @@ async def login(
 
                     # SMS and Email OTP are always available as fallback methods
                     # These work independently of Duo device enrollment
-                    available_methods.append("duo_sms")
-                    available_methods.append("email_otp")
+                    available_methods.append("duo_sms")  # Duo SMS
+                    available_methods.append("twilio_sms")  # Twilio SMS (independent)
+                    available_methods.append("email_otp")  # Email OTP via SendGrid
 
                     # Store MFA data with duo_identifier, enrollment status, and available methods
                     mfa_data["duo_identifier"] = duo_identifier
@@ -498,16 +501,106 @@ async def trigger_mfa(
                 json.dumps(mfa_data)
             )
 
-            # TODO: Send email with OTP code
-            # For now, just log it (in production, integrate with email service)
-            logger.info(f"Email OTP generated for {user_email}: {otp_code}")
+            # Send email with OTP code using SendGrid
+            try:
+                sendgrid_service = get_sendgrid_service()
+                email_sent = await sendgrid_service.send_otp_email(
+                    to_email=user_email,
+                    otp_code=otp_code,
+                    username=mfa_data.get("username")
+                )
+
+                if email_sent:
+                    logger.info(f"Email OTP sent successfully to {user_email}")
+                else:
+                    logger.error(f"Failed to send email OTP to {user_email}")
+                    raise HTTPException(
+                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                        detail="Failed to send verification email. Please try again later."
+                    )
+            except ValueError as e:
+                # SendGrid not configured
+                logger.warning(f"SendGrid not configured: {str(e)}")
+                logger.info(f"Email OTP generated for {user_email}: {otp_code} (email service not configured)")
 
             return {
                 "status": "sent",
                 "message": f"Verification code sent to {user_email}. Please check your email and enter the code.",
-                "method": "email_otp",
-                "otp": otp_code  # REMOVE THIS IN PRODUCTION! Only for testing
+                "method": "email_otp"
             }
+
+        elif request.method == "twilio_sms":
+            # Send SMS OTP via Twilio (independent of Duo)
+            # Get user's phone number from database
+            db_adapter = get_database_adapter()
+            async for db_session in db_adapter.get_session():
+                try:
+                    result = await db_session.execute(
+                        select(User).where(User.id == mfa_data.get("user_id"))
+                    )
+                    user = result.scalar_one_or_none()
+
+                    if not user or not user.phone_number:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Phone number not registered. Please update your profile to use SMS authentication."
+                        )
+
+                    # Generate SMS OTP
+                    otp_code = secrets.token_hex(3).upper()  # 6-character code
+
+                    # Store OTP in Redis
+                    mfa_data["sms_otp"] = otp_code
+                    mfa_data["twilio_sms_sent"] = True
+                    await redis_client.setex(
+                        f"mfa_token:{request.mfa_token}",
+                        300,
+                        json.dumps(mfa_data)
+                    )
+
+                    # Send SMS via Twilio
+                    try:
+                        twilio_service = get_twilio_service()
+                        sms_result = await twilio_service.send_otp_sms(
+                            to_phone=user.phone_number,
+                            otp_code=otp_code,
+                            username=user.username
+                        )
+
+                        if sms_result["status"] == "success":
+                            logger.info(f"Twilio SMS OTP sent successfully to {user.phone_number}")
+                        elif sms_result["status"] == "invalid_phone":
+                            raise HTTPException(
+                                status_code=status.HTTP_400_BAD_REQUEST,
+                                detail="Invalid phone number format. Please update your profile with a valid phone number in E.164 format (e.g., +1234567890)."
+                            )
+                        else:
+                            raise HTTPException(
+                                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                                detail="Failed to send SMS. Please try again later."
+                            )
+                    except ValueError as e:
+                        # Twilio not configured
+                        logger.warning(f"Twilio not configured: {str(e)}")
+                        logger.info(f"SMS OTP generated for {user.phone_number}: {otp_code} (SMS service not configured)")
+
+                    # Mask phone number for display
+                    masked_phone = f"{user.phone_number[:2]}***{user.phone_number[-4:]}" if len(user.phone_number) > 6 else "***"
+
+                    return {
+                        "status": "sent",
+                        "message": f"Verification code sent to {masked_phone}. Please check your phone and enter the code.",
+                        "method": "twilio_sms"
+                    }
+
+                except HTTPException:
+                    raise
+                except Exception as e:
+                    logger.error(f"Error sending Twilio SMS: {e}", exc_info=True)
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail="Failed to send SMS verification code"
+                    )
 
         else:
             raise HTTPException(
@@ -561,9 +654,46 @@ async def verify_mfa(
             )
 
         mfa_data = json.loads(mfa_data_json)
-        push_result = mfa_data.get("push_result")
 
-        # Check push result
+        # Check if passcode is provided (for OTP methods)
+        if request.passcode:
+            logger.info(f"Verifying OTP passcode for token {request.mfa_token[:8]}...")
+
+            # Check email OTP
+            if mfa_data.get("email_otp"):
+                if request.passcode.upper() == mfa_data.get("email_otp"):
+                    logger.info(f"Email OTP verified successfully for user {mfa_data['user_id']}")
+                    # Fall through to complete login below
+                    push_result = "allow"
+                else:
+                    logger.warning(f"Invalid email OTP provided for user {mfa_data['user_id']}")
+                    return MFAStatusResponse(
+                        status="error",
+                        message="Invalid verification code. Please try again."
+                    )
+
+            # Check SMS OTP (Twilio)
+            elif mfa_data.get("sms_otp"):
+                if request.passcode.upper() == mfa_data.get("sms_otp"):
+                    logger.info(f"SMS OTP verified successfully for user {mfa_data['user_id']}")
+                    # Fall through to complete login below
+                    push_result = "allow"
+                else:
+                    logger.warning(f"Invalid SMS OTP provided for user {mfa_data['user_id']}")
+                    return MFAStatusResponse(
+                        status="error",
+                        message="Invalid verification code. Please try again."
+                    )
+            else:
+                return MFAStatusResponse(
+                    status="error",
+                    message="No OTP code was generated. Please request a new code."
+                )
+        else:
+            # No passcode provided - check Duo push result
+            push_result = mfa_data.get("push_result")
+
+        # Check push result or OTP verification
         if push_result == "allow":
             logger.info(f"Duo Push approved for user {mfa_data['user_id']}")
 
