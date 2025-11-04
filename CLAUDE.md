@@ -4,18 +4,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is the **Mantis Material React Admin Template** - a React-based admin dashboard template built with Vite, Material-UI (MUI), and multiple authentication providers. The repository contains two versions:
-
-- **full-version**: Complete dashboard with all features, pages, and components pre-integrated
-- **seed**: Minimal setup with essential dependencies for building from scratch
+This is a full-stack application with:
+- **Frontend**: React-based admin dashboard template built with Vite, Material-UI (MUI), and JWT authentication
+- **Backend**: FastAPI Python backend with PostgreSQL, MongoDB, and Redis
 
 ## Development Commands
 
-### Full Version
-Navigate to `full-version/` directory first:
+### Frontend (React + Vite)
+Navigate to `frontend/` directory first:
 
 ```bash
-cd full-version
+cd frontend
 npm install          # Install dependencies
 npm run start        # Start dev server (runs on port 3000)
 npm run build        # Production build
@@ -25,21 +24,28 @@ npm run lint:fix     # Auto-fix ESLint issues
 npm run prettier     # Format code with Prettier
 ```
 
-### Seed Version
-Navigate to `seed/` directory first:
+### Backend (FastAPI)
+Navigate to `backend/` directory first:
 
 ```bash
-cd seed
-npm install          # Install dependencies
-npm run start        # Start dev server
-npm run build        # Production build
-npm run preview      # Preview production build
-npm run lint         # Run ESLint
-npm run lint:fix     # Auto-fix ESLint issues
-npm run prettier     # Format code with Prettier
+cd backend
+pip install -r requirements.txt    # Install dependencies
+uvicorn app.main:app --reload     # Start dev server (runs on port 8000)
+alembic upgrade head               # Run database migrations
+python scripts/seed_test_user.py  # Seed test user
 ```
 
-**Note**: Both versions use the same npm scripts. Always work within either `full-version/` or `seed/` directory, not the root.
+### Docker Compose
+Start all services from the root directory:
+
+```bash
+docker-compose up -d               # Start all services
+docker-compose ps                  # Check service status
+docker-compose logs backend        # View backend logs
+docker-compose --profile frontend up  # Include frontend in Docker
+```
+
+**Note**: Always work within either `frontend/` or `backend/` directory for npm/pip commands.
 
 ## Architecture & Code Organization
 
@@ -167,10 +173,14 @@ Configured in `jsconfig.json` for cleaner imports:
 
 ## Important Development Notes
 
-1. **Work in the correct directory**: Always `cd` into `full-version/` or `seed/` before running npm commands
-2. **Authentication**: Default is JWT using mock backend. Switch providers by modifying `src/App.jsx` and `src/config.js`
-3. **API calls**: Use the pre-configured axios instance from `src/utils/axios.js` for automatic token handling
-4. **Theme changes**: Modify `src/config.js` or use the `useConfig` hook to change theme settings dynamically
-5. **New routes**: Add to appropriate route file in `src/routes/` and update menu items in `src/menu-items/`
-6. **Components**: Full-version includes extensive component library (forms, tables, charts, etc.); seed has minimal components
-7. **Production build**: Console logs are automatically removed in production builds
+1. **Work in the correct directory**: Always `cd` into `frontend/` or `backend/` before running npm/pip commands
+2. **Authentication**: Default is JWT using FastAPI backend at http://localhost:8000
+3. **API calls**: Use the pre-configured axios instance from `frontend/src/utils/axios.js` for automatic token handling
+4. **Environment Variables**:
+   - Frontend: `frontend/.env` (VITE_APP_API_URL)
+   - Backend: `backend/.env` (DB credentials, JWT secrets)
+5. **Database**: PostgreSQL on port 5432, MongoDB on port 27017, Redis on port 6379
+6. **Default Login**: Email: info@codedthemes.com, Password: 12345
+7. **Theme changes**: Modify `frontend/src/config.js` or use the `useConfig` hook
+8. **New routes**: Add to appropriate route file in `frontend/src/routes/` and update menu items in `frontend/src/menu-items/`
+9. **Production build**: Console logs are automatically removed in production builds

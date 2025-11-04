@@ -134,16 +134,16 @@ services:
   # Frontend (React/Vite)
   frontend:
     build:
-      context: ./full-version
-      dockerfile: ../deploy/docker/Dockerfile.frontend
+      context: ./frontend
+      dockerfile: Dockerfile
     container_name: app-frontend
     environment:
       VITE_APP_API_URL: "http://localhost:8000/api/v1"
     ports:
       - "3000:3000"
     volumes:
-      - ./full-version/src:/app/src  # Mount source for hot-reload
-      - ./full-version/public:/app/public
+      - ./frontend/src:/app/src  # Mount source for hot-reload
+      - ./frontend/public:/app/public
     networks:
       - app-network
     command: npm run start
