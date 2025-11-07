@@ -12,6 +12,7 @@ const JwtAuthForgotPassword = Loadable(lazy(() => import('pages/auth/jwt/forgot-
 const JwtAuthResetPassword = Loadable(lazy(() => import('pages/auth/jwt/reset-password')));
 const JwtAuthCodeVerification = Loadable(lazy(() => import('pages/auth/jwt/code-verification')));
 const JwtAuthCheckMail = Loadable(lazy(() => import('pages/auth/jwt/check-mail')));
+const TOTPSetupTest = Loadable(lazy(() => import('pages/auth/totp-setup-test')));
 
 // firebase auth
 const FirebaseAuthLogin = Loadable(lazy(() => import('pages/auth/firebase/login')));
@@ -69,7 +70,8 @@ const LoginRoutes = {
             { path: 'forgot-password', element: <JwtAuthForgotPassword /> },
             { path: 'check-mail', element: <JwtAuthCheckMail /> },
             { path: 'reset-password', element: <JwtAuthResetPassword /> },
-            { path: 'code-verification', element: <JwtAuthCodeVerification /> }
+            { path: 'code-verification', element: <JwtAuthCodeVerification /> },
+            { path: 'totp-setup', element: <TOTPSetupTest /> }
           ]
         },
         {

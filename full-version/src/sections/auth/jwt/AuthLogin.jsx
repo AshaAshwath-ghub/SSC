@@ -38,6 +38,7 @@ import MobileOutlined from '@ant-design/icons/MobileOutlined';
 import PhoneOutlined from '@ant-design/icons/PhoneOutlined';
 import MessageOutlined from '@ant-design/icons/MessageOutlined';
 import MailOutlined from '@ant-design/icons/MailOutlined';
+import SafetyOutlined from '@ant-design/icons/SafetyOutlined';
 
 // ============================|| JWT - LOGIN ||============================ //
 
@@ -78,7 +79,7 @@ export default function AuthLogin({ isDemo = false }) {
       setSelectedMethod(method);
 
       // Check if this is an OTP-based method
-      const isOtpMethod = method === 'duo_sms' || method === 'email_otp' || method === 'twilio_sms';
+      const isOtpMethod = method === 'duo_sms' || method === 'email_otp' || method === 'twilio_sms' || method === 'totp';
 
       if (isOtpMethod) {
         // For OTP methods, show sending status temporarily
@@ -187,7 +188,7 @@ export default function AuthLogin({ isDemo = false }) {
         // User denied the push or invalid OTP
         console.log('✗ LOGIN DENIED');
         setMfaStatus('denied');
-        const isOtpMethod = selectedMethod === 'duo_sms' || selectedMethod === 'email_otp' || selectedMethod === 'twilio_sms';
+        const isOtpMethod = selectedMethod === 'duo_sms' || selectedMethod === 'email_otp' || selectedMethod === 'twilio_sms' || selectedMethod === 'totp';
         setMfaMessage(isOtpMethod ? 'Invalid verification code.' : 'Authentication denied. Please try again.');
         clearInterval(pollingInterval.current);
         setSubmittedOtp(null); // Clear stored OTP
@@ -554,6 +555,24 @@ export default function AuthLogin({ isDemo = false }) {
                 </Box>
               </Button>
             )}
+
+            {availableMfaMethods.includes('totp') && (
+              <Button
+                fullWidth
+                variant="outlined"
+                size="large"
+                onClick={() => triggerMfaMethod('totp')}
+                startIcon={<SafetyOutlined />}
+                sx={{ justifyContent: 'flex-start', py: 2, textAlign: 'left' }}
+              >
+                <Box>
+                  <Typography variant="subtitle1">Authenticator App</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Use your authenticator app (Google Authenticator, Authy, etc.)
+                  </Typography>
+                </Box>
+              </Button>
+            )}
           </Stack>
 
           <Button
@@ -590,6 +609,9 @@ export default function AuthLogin({ isDemo = false }) {
           {selectedMethod === 'email_otp' && (
             <MailOutlined style={{ fontSize: 64, color: '#1890ff', marginBottom: 16 }} />
           )}
+          {selectedMethod === 'totp' && (
+            <SafetyOutlined style={{ fontSize: 64, color: '#1890ff', marginBottom: 16 }} />
+          )}
           {!selectedMethod && (
             <MobileOutlined style={{ fontSize: 64, color: '#1890ff', marginBottom: 16 }} />
           )}
@@ -598,7 +620,7 @@ export default function AuthLogin({ isDemo = false }) {
               ? 'Duo Push Sent'
               : selectedMethod === 'duo_phone'
                 ? 'Calling Your Phone'
-                : (selectedMethod === 'duo_sms' || selectedMethod === 'email_otp')
+                : (selectedMethod === 'duo_sms' || selectedMethod === 'email_otp' || selectedMethod === 'totp')
                   ? 'Verifying Code'
                   : 'Authentication Requested'}
           </Typography>

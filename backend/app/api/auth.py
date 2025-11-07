@@ -17,8 +17,9 @@ from app.core.logging import get_logger, request_id_ctx
 from app.core.duo_security import get_duo_service
 from app.core.sendgrid_service import get_sendgrid_service
 from app.core.twilio_service import get_twilio_service
+from app.core.totp_service import get_totp_service
 from app.db.adapters import get_database_adapter
-from app.db.models.user import User, Session as UserSession
+from app.db.models.user import User, Session as UserSession, MFAEnrollment
 from app.schemas.auth import (
     LoginRequest,
     LoginResponse,
@@ -26,7 +27,11 @@ from app.schemas.auth import (
     ErrorResponse,
     MFATriggerRequest,
     MFAVerifyRequest,
-    MFAStatusResponse
+    MFAStatusResponse,
+    TOTPSetupRequest,
+    TOTPSetupResponse,
+    TOTPVerifySetupRequest,
+    TOTPVerifySetupResponse
 )
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -256,6 +261,19 @@ async def login(
                     available_methods.append("duo_sms")  # Duo SMS
                     available_methods.append("twilio_sms")  # Twilio SMS (independent)
                     available_methods.append("email_otp")  # Email OTP via SendGrid
+
+                    # Check if user has TOTP enrolled
+                    totp_enrollment = await session.execute(
+                        select(MFAEnrollment).where(
+                            MFAEnrollment.user_id == user.id,
+                            MFAEnrollment.mfa_type == "totp",
+                            MFAEnrollment.is_active == True
+                        )
+                    )
+                    totp_record = totp_enrollment.scalar_one_or_none()
+                    if totp_record:
+                        available_methods.append("totp")  # TOTP Authenticator
+                        logger.info(f"User {user.id} has TOTP enrolled")
 
                     # Store MFA data with duo_identifier, enrollment status, and available methods
                     mfa_data["duo_identifier"] = duo_identifier
@@ -602,6 +620,23 @@ async def trigger_mfa(
                         detail="Failed to send SMS verification code"
                     )
 
+        elif request.method == "totp":
+            # TOTP doesn't need "triggering" - user just enters code from their app
+            # Just acknowledge and mark as ready
+            mfa_data["totp_selected"] = True
+            await redis_client.setex(
+                f"mfa_token:{request.mfa_token}",
+                300,
+                json.dumps(mfa_data)
+            )
+
+            logger.info(f"TOTP method selected for token {request.mfa_token}")
+            return {
+                "status": "ready",
+                "message": "Please enter the 6-digit code from your authenticator app.",
+                "method": "totp"
+            }
+
         else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -659,8 +694,60 @@ async def verify_mfa(
         if request.passcode:
             logger.info(f"Verifying OTP passcode for token {request.mfa_token[:8]}...")
 
+            # Check TOTP (Authenticator App)
+            if mfa_data.get("totp_selected"):
+                # Get user's TOTP secret from database
+                db_adapter = get_database_adapter()
+                async for db_session in db_adapter.get_session():
+                    try:
+                        # Get TOTP enrollment for this user
+                        totp_result = await db_session.execute(
+                            select(MFAEnrollment).where(
+                                MFAEnrollment.user_id == mfa_data['user_id'],
+                                MFAEnrollment.mfa_type == "totp",
+                                MFAEnrollment.is_active == True
+                            )
+                        )
+                        totp_enrollment = totp_result.scalar_one_or_none()
+
+                        if not totp_enrollment:
+                            logger.warning(f"TOTP enrollment not found for user {mfa_data['user_id']}")
+                            return MFAStatusResponse(
+                                status="error",
+                                message="TOTP authenticator not configured. Please set it up in your profile."
+                            )
+
+                        # Verify TOTP code
+                        totp_service = get_totp_service()
+                        is_valid = totp_service.verify_otp(
+                            totp_enrollment.secret_or_identifier,
+                            request.passcode
+                        )
+
+                        if is_valid:
+                            logger.info(f"TOTP verified successfully for user {mfa_data['user_id']}")
+                            # Update last_used_at timestamp
+                            totp_enrollment.last_used_at = datetime.utcnow()
+                            await db_session.commit()
+                            # Fall through to complete login below
+                            push_result = "allow"
+                            break  # Exit the async for loop
+                        else:
+                            logger.warning(f"Invalid TOTP code provided for user {mfa_data['user_id']}")
+                            return MFAStatusResponse(
+                                status="error",
+                                message="Invalid verification code. Please ensure your device time is synchronized and try again."
+                            )
+
+                    except Exception as e:
+                        logger.error(f"Error verifying TOTP: {str(e)}", exc_info=True)
+                        return MFAStatusResponse(
+                            status="error",
+                            message="An error occurred while verifying your code."
+                        )
+
             # Check email OTP
-            if mfa_data.get("email_otp"):
+            elif mfa_data.get("email_otp"):
                 if request.passcode.upper() == mfa_data.get("email_otp"):
                     logger.info(f"Email OTP verified successfully for user {mfa_data['user_id']}")
                     # Fall through to complete login below
@@ -790,3 +877,223 @@ async def verify_mfa(
             status="error",
             message="An unexpected error occurred during verification"
         )
+
+
+@router.post(
+    "/mfa/totp/setup",
+    response_model=TOTPSetupResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Setup TOTP Authenticator",
+    description="Initialize TOTP setup and get QR code for authenticator app"
+)
+async def setup_totp(
+    request: TOTPSetupRequest,
+    http_request: Request
+) -> TOTPSetupResponse:
+    """
+    Initialize TOTP setup for a user.
+    Returns QR code and secret for authenticator app configuration.
+
+    Args:
+        request: TOTP setup request with user email
+        http_request: FastAPI request object
+
+    Returns:
+        TOTPSetupResponse with secret, QR code, and backup codes
+
+    Raises:
+        HTTPException: If user not found or TOTP already enabled
+    """
+    logger.info(f"TOTP setup requested for email: {request.user_email}")
+
+    # For now, require user_email in request
+    # In production, you'd get this from JWT token
+    if not request.user_email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User email is required for TOTP setup"
+        )
+
+    db_adapter = get_database_adapter()
+    async for session in db_adapter.get_session():
+        try:
+            # Find user by email
+            result = await session.execute(
+                select(User).where(User.email == request.user_email)
+            )
+            user = result.scalar_one_or_none()
+
+            if not user:
+                logger.warning(f"TOTP setup failed: User not found for email {request.user_email}")
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="User not found"
+                )
+
+            # Check if user already has active TOTP enrollment
+            existing_totp = await session.execute(
+                select(MFAEnrollment).where(
+                    MFAEnrollment.user_id == user.id,
+                    MFAEnrollment.mfa_type == "totp",
+                    MFAEnrollment.is_active == True
+                )
+            )
+            if existing_totp.scalar_one_or_none():
+                logger.warning(f"TOTP setup failed: User {user.id} already has active TOTP")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="TOTP authenticator is already configured. Please disable it first to set up a new one."
+                )
+
+            # Generate TOTP setup data
+            totp_service = get_totp_service()
+            setup_data = await totp_service.setup_totp_for_user(
+                user_email=user.email,
+                issuer_name=None  # Use default from settings
+            )
+
+            # Store secret temporarily in Redis (valid for 10 minutes for setup)
+            redis_client = await get_redis_client()
+            setup_token = secrets.token_urlsafe(32)
+
+            await redis_client.setex(
+                f"totp_setup:{setup_token}",
+                600,  # 10 minutes
+                json.dumps({
+                    "user_id": user.id,
+                    "email": user.email,
+                    "secret": setup_data["secret"],
+                    "backup_codes_hashed": setup_data["backup_codes_hashed"],
+                    "timestamp": datetime.utcnow().isoformat()
+                })
+            )
+
+            logger.info(f"TOTP setup initiated for user {user.id}")
+
+            return TOTPSetupResponse(
+                secret=setup_data["secret"],
+                qr_code=setup_data["qr_code"],
+                provisioning_uri=setup_data["provisioning_uri"],
+                backup_codes=setup_data["backup_codes"],
+                issuer_name=totp_service.issuer_name
+            )
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"TOTP setup error: {str(e)}", exc_info=True)
+            logger.error(f"Error type: {type(e).__name__}")
+            logger.error(f"Error traceback:", exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"An unexpected error occurred during TOTP setup: {str(e)}"
+            )
+
+
+@router.post(
+    "/mfa/totp/verify-setup",
+    response_model=TOTPVerifySetupResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Verify and Activate TOTP",
+    description="Verify TOTP code and activate authenticator for the user"
+)
+async def verify_totp_setup(
+    request: TOTPVerifySetupRequest,
+    http_request: Request
+) -> TOTPVerifySetupResponse:
+    """
+    Verify TOTP code and complete setup by saving enrollment to database.
+
+    Args:
+        request: TOTP verify setup request with secret and OTP code
+        http_request: FastAPI request object
+
+    Returns:
+        TOTPVerifySetupResponse with status and enrollment ID
+
+    Raises:
+        HTTPException: If verification fails or enrollment cannot be saved
+    """
+    logger.info(f"TOTP verification requested for secret: {request.secret[:8]}...")
+
+    # Verify the TOTP code
+    totp_service = get_totp_service()
+    is_valid = totp_service.verify_otp(request.secret, request.otp_code)
+
+    if not is_valid:
+        logger.warning(f"TOTP verification failed: Invalid OTP code")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid verification code. Please ensure your device time is synchronized and try again."
+        )
+
+    # Get setup data from Redis to find user
+    redis_client = await get_redis_client()
+
+    # Search for setup token matching this secret
+    # In production, you'd pass the setup_token from frontend
+    # For now, we'll search Redis keys (not ideal, but works for demo)
+    setup_data = None
+    user_id = None
+    backup_codes_hashed = None
+
+    # This is a simplified approach - in production, pass setup_token from frontend
+    # and use: setup_data_json = await redis_client.get(f"totp_setup:{setup_token}")
+
+    db_adapter = get_database_adapter()
+    async for session in db_adapter.get_session():
+        try:
+            # For now, we'll need to search all setup tokens
+            # Better approach: return setup_token from /setup endpoint and require it here
+            keys = await redis_client.keys("totp_setup:*")
+
+            for key in keys:
+                data_json = await redis_client.get(key)
+                if data_json:
+                    data = json.loads(data_json)
+                    if data.get("secret") == request.secret:
+                        setup_data = data
+                        user_id = data.get("user_id")
+                        backup_codes_hashed = data.get("backup_codes_hashed", [])
+                        await redis_client.delete(key)  # Remove setup token
+                        break
+
+            if not setup_data or not user_id:
+                logger.warning("TOTP verification failed: Setup data not found or expired")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="TOTP setup session expired. Please start setup again."
+                )
+
+            # Create MFA enrollment record
+            enrollment = MFAEnrollment(
+                user_id=user_id,
+                mfa_type="totp",
+                secret_or_identifier=request.secret,
+                backup_codes=backup_codes_hashed,
+                is_active=True,
+                is_primary=False,  # Can be set to True if it's the user's first/primary MFA
+                verified_at=datetime.utcnow(),
+                last_used_at=None
+            )
+
+            session.add(enrollment)
+            await session.commit()
+            await session.refresh(enrollment)
+
+            logger.info(f"TOTP enrollment created successfully for user {user_id}, enrollment_id={enrollment.id}")
+
+            return TOTPVerifySetupResponse(
+                status="success",
+                message="TOTP authenticator successfully configured. You can now use it for login.",
+                enrollment_id=enrollment.id
+            )
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"TOTP verification error: {str(e)}", exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="An unexpected error occurred during TOTP verification"
+            )

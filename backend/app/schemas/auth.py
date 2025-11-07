@@ -139,6 +139,84 @@ class MFAStatusResponse(BaseModel):
     }
 
 
+class TOTPSetupRequest(BaseModel):
+    """Request to initiate TOTP setup."""
+
+    user_email: Optional[EmailStr] = Field(None, description="User email (optional, can be derived from token)")
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "user_email": "user@example.com"
+                }
+            ]
+        }
+    }
+
+
+class TOTPSetupResponse(BaseModel):
+    """Response for TOTP setup with QR code and secret."""
+
+    secret: str = Field(..., description="Base32-encoded TOTP secret")
+    qr_code: str = Field(..., description="Base64-encoded QR code image (data URI)")
+    provisioning_uri: str = Field(..., description="Provisioning URI for manual entry")
+    backup_codes: List[str] = Field(..., description="Backup recovery codes (show once)")
+    issuer_name: str = Field(..., description="Application name shown in authenticator app")
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "secret": "JBSWY3DPEHPK3PXP",
+                    "qr_code": "data:image/png;base64,iVBORw0KG...",
+                    "provisioning_uri": "otpauth://totp/SSC%20App:user@example.com?secret=JBSWY3DPEHPK3PXP&issuer=SSC%20App",
+                    "backup_codes": ["1234-5678-9012", "2345-6789-0123"],
+                    "issuer_name": "SSC App"
+                }
+            ]
+        }
+    }
+
+
+class TOTPVerifySetupRequest(BaseModel):
+    """Request to verify TOTP code and complete setup."""
+
+    secret: str = Field(..., description="TOTP secret being verified")
+    otp_code: str = Field(..., min_length=6, max_length=6, description="6-digit OTP code from authenticator app")
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "secret": "JBSWY3DPEHPK3PXP",
+                    "otp_code": "123456"
+                }
+            ]
+        }
+    }
+
+
+class TOTPVerifySetupResponse(BaseModel):
+    """Response after successful TOTP setup verification."""
+
+    status: str = Field(..., description="Setup status: 'success' or 'error'")
+    message: str = Field(..., description="Status message")
+    enrollment_id: Optional[int] = Field(None, description="MFA enrollment ID if successful")
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "status": "success",
+                    "message": "TOTP authenticator successfully configured",
+                    "enrollment_id": 42
+                }
+            ]
+        }
+    }
+
+
 class ErrorResponse(BaseModel):
     """Error response schema."""
 
