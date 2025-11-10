@@ -1,0 +1,80 @@
+# SSC Helm values.yaml
+
+backend:
+  image:
+    repository: jgacr.azurecr.io/ssc-backend
+    tag: latest
+    pullPolicy: IfNotPresent
+  env:
+    DATABASE_URL: "postgresql://sscuser:sscpassword@ssc-postgres:5432/sscdb"
+    MONGO_URL: "mongodb://ssc-mongodb:27017/appdb"
+    REDIS_URL: "redis://ssc-redis:6379"
+    # Add other environment variables as needed
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+  service:
+    type: ClusterIP
+    port: 8000
+
+frontend:
+  image:
+    repository: jgacr.azurecr.io/ssc-frontend
+    tag: latest
+    pullPolicy: IfNotPresent
+  env:
+    REACT_APP_API_URL: "http://ssc-backend:8000"
+    # Add other frontend environment variables as needed
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 250m
+      memory: 512Mi
+  service:
+    type: ClusterIP
+    port: 80
+
+postgresql:
+  enabled: true
+  image: postgres:16-alpine
+  username: sscuser
+  password: sscpassword
+  database: sscdb
+  service:
+    port: 5432
+  persistence:
+    enabled: true
+    storageClass: managed-premium
+    size: 20Gi
+mongodb:
+  enabled: true
+  image: mongo:7-jammy
+  database: appdb
+  service:
+    port: 27017
+  persistence:
+    enabled: true
+    storageClass: managed-premium
+    size: 20Gi
+
+redis:
+  enabled: true
+  image: redis:7-alpine
+  service:
+    port: 6379
+  persistence:
+    enabled: true
+    storageClass: managed-premium
+    size: 5Gi
+
+ingress:
+  enabled: false
+  # Configure if you want to expose via Ingress
+
+# Add any other global or chart-specific values below
