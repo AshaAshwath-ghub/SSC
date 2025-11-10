@@ -423,6 +423,11 @@ docker-compose.override.yml
 *.p12
 *.pfx
 
+# Kubernetes secrets (NEVER commit real secrets!)
+deploy/aks/k8s/02-secrets.yaml
+**/secrets.yaml
+**/02-secrets.yaml
+
 # Test files
 test-results/
 playwright-report/

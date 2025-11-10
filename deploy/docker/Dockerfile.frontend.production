@@ -1,0 +1,54 @@
+# Multi-stage production Dockerfile for Frontend (React/Vite)
+
+# Stage 1: Build the application
+FROM node:20-alpine as builder
+
+WORKDIR /app
+
+# Copy package files
+COPY full-version/package*.json ./
+
+# Install dependencies
+RUN npm ci --only=production && npm cache clean --force
+
+# Copy source code
+COPY full-version/ .
+
+# Build arguments for environment variables
+ARG VITE_APP_API_URL
+ARG VITE_APP_VERSION
+ARG VITE_APP_BASE_NAME
+
+# Build the application
+RUN npm run build
+
+# Stage 2: Production server with nginx
+FROM nginx:1.25-alpine
+
+# Copy custom nginx config
+COPY deploy/docker/nginx.conf /etc/nginx/nginx.conf
+COPY deploy/docker/default.conf /etc/nginx/conf.d/default.conf
+
+# Copy built files from builder
+COPY --from=builder /app/dist /usr/share/nginx/html
+
+# Create non-root user
+RUN addgroup -g 1000 appuser && \
+    adduser -D -u 1000 -G appuser appuser && \
+    chown -R appuser:appuser /usr/share/nginx/html && \
+    chown -R appuser:appuser /var/cache/nginx && \
+    chown -R appuser:appuser /var/log/nginx && \
+    touch /var/run/nginx.pid && \
+    chown -R appuser:appuser /var/run/nginx.pid
+
+USER appuser
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD wget --quiet --tries=1 --spider http://localhost:3000/ || exit 1
+
+# Expose port
+EXPOSE 3000
+
+# Start nginx
+CMD ["nginx", "-g", "daemon off;"]

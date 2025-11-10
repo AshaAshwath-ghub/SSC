@@ -1,0 +1,36 @@
+# Custom PostgreSQL Image for SSC Application
+FROM postgres:16-alpine
+
+# Install additional extensions and tools
+RUN apk add --no-cache \
+    postgresql-contrib \
+    curl \
+    bash
+
+# Set labels
+LABEL maintainer="SSC Team"
+LABEL version="16.0"
+LABEL description="PostgreSQL database for SSC Application"
+
+# Environment variables (can be overridden)
+ENV POSTGRES_DB=appdb \
+    POSTGRES_USER=postgres \
+    POSTGRES_PASSWORD=postgres \
+    PGDATA=/var/lib/postgresql/data/pgdata
+
+# Copy initialization scripts
+COPY deploy/docker/postgres-init-scripts/ /docker-entrypoint-initdb.d/
+
+# Create directory for backups
+RUN mkdir -p /var/lib/postgresql/backups && \
+    chown -R postgres:postgres /var/lib/postgresql/backups
+
+# Expose PostgreSQL port
+EXPOSE 5432
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD pg_isready -U postgres || exit 1
+
+# Use the default entrypoint from the base image
+# It will run scripts in /docker-entrypoint-initdb.d/ on first start
