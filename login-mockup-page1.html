@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sign In - Startup Accelerator</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html, body {
+            height: 100%;
+            width: 100%;
+            overflow: hidden;
+        }
+
+        body {
+            font-family: 'Public Sans', sans-serif;
+        }
+
+        /* Full Screen Background Layer */
+        .background-layer {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background-image: url('https://images.unsplash.com/photo-1497633762265-9d179a990aa6?w=1920');
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+            z-index: 0;
+        }
+
+        /* Gradient Overlay */
+        .gradient-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: linear-gradient(90deg,
+                rgba(255, 255, 255, 0) 0%,
+                rgba(255, 255, 255, 0.05) 20%,
+                rgba(255, 255, 255, 0.2) 40%,
+                rgba(255, 255, 255, 0.5) 55%,
+                rgba(255, 255, 255, 0.8) 65%,
+                rgba(255, 255, 255, 1) 70%,
+                rgba(255, 255, 255, 1) 100%);
+            z-index: 1;
+            pointer-events: none;
+        }
+
+        /* Login Panel - Right Side */
+        .login-panel {
+            position: fixed;
+            top: 0;
+            right: 0;
+            width: 35%;
+            min-width: 500px;
+            height: 100vh;
+            background: transparent;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 40px 50px;
+            z-index: 10;
+            overflow-y: auto;
+        }
+
+        .login-container {
+            width: 100%;
+            max-width: 400px;
+            background: transparent;
+            padding: 40px 30px;
+        }
+
+        /* Logo */
+        .logo {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        /* Sign In Heading */
+        .heading {
+            text-align: center;
+            margin-bottom: 10px;
+        }
+
+        .heading h1 {
+            font-size: 28px;
+            font-weight: 600;
+            color: #1a1a1a;
+            margin-bottom: 8px;
+        }
+
+        /* Form Elements */
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 13px;
+            font-weight: 600;
+            color: #333333;
+            margin-bottom: 8px;
+        }
+
+        .required {
+            color: #000000;
+        }
+
+        .form-input {
+            width: 100%;
+            padding: 12px 16px;
+            font-size: 14px;
+            border: 1px solid #D0D0D0;
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.9);
+            color: #333333;
+            transition: all 0.3s ease;
+            outline: none;
+        }
+
+        .form-input:focus {
+            border-color: #4169E1;
+            box-shadow: 0 0 0 3px rgba(65, 105, 225, 0.1);
+        }
+
+        .form-input::placeholder {
+            color: #AAAAAA;
+            font-size: 13px;
+        }
+
+        /* Password Input with Eye Icon */
+        .password-wrapper {
+            position: relative;
+        }
+
+        .password-wrapper .form-input {
+            padding-right: 45px;
+        }
+
+        .toggle-password {
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            cursor: pointer;
+            color: #666666;
+            padding: 5px;
+            user-select: none;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .toggle-password:hover {
+            color: #333333;
+        }
+
+        .toggle-password svg {
+            width: 20px;
+            height: 20px;
+        }
+
+        /* Sign In Button */
+        .btn-signin {
+            width: 100%;
+            padding: 14px;
+            background: #4169E1;
+            color: #FFFFFF;
+            border: none;
+            border-radius: 6px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-top: 10px;
+            box-shadow: 0 2px 8px rgba(65, 105, 225, 0.3);
+        }
+
+        .btn-signin:hover {
+            background: #3557c4;
+            box-shadow: 0 4px 12px rgba(65, 105, 225, 0.4);
+            transform: translateY(-1px);
+        }
+
+        .btn-signin:active {
+            transform: translateY(0);
+        }
+
+        /* Divider */
+        .divider {
+            display: flex;
+            align-items: center;
+            margin: 25px 0;
+            color: #999999;
+            font-size: 13px;
+        }
+
+        .divider::before,
+        .divider::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: #E0E0E0;
+        }
+
+        .divider span {
+            padding: 0 15px;
+        }
+
+        /* Microsoft Button */
+        .btn-microsoft {
+            width: 100%;
+            padding: 12px;
+            background: rgba(255, 255, 255, 0.9);
+            color: #5E5E5E;
+            border: 1px solid #D5D5D5;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            transition: all 0.3s ease;
+        }
+
+        .btn-microsoft:hover {
+            background: #F5F5F5;
+            border-color: #C0C0C0;
+        }
+
+        /* Support Text */
+        .support-text {
+            text-align: center;
+            font-size: 12px;
+            color: #666666;
+            margin-top: 30px;
+            line-height: 1.6;
+        }
+
+        .support-text a {
+            color: #4169E1;
+            text-decoration: none;
+        }
+
+        .support-text a:hover {
+            text-decoration: underline;
+        }
+
+        /* Responsive Design */
+        @media (max-width: 1024px) {
+            .login-panel {
+                width: 45%;
+                min-width: 450px;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .background-layer {
+                display: none;
+            }
+
+            .gradient-overlay {
+                display: none;
+            }
+
+            .login-panel {
+                width: 100%;
+                min-width: auto;
+                position: relative;
+                padding: 40px 30px;
+                background: #f5f5f5;
+            }
+
+            .login-container {
+                background: rgba(255, 255, 255, 0.95);
+                border-radius: 12px;
+                box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+            }
+        }
+
+        @media (max-width: 480px) {
+            .login-panel {
+                padding: 30px 20px;
+            }
+
+            .login-container {
+                max-width: 100%;
+                padding: 30px 20px;
+            }
+
+            .heading h1 {
+                font-size: 24px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Full Screen Background -->
+    <div class="background-layer"></div>
+
+    <!-- Gradient Overlay -->
+    <div class="gradient-overlay"></div>
+
+    <!-- Login Panel - Right Side -->
+    <div class="login-panel">
+        <div class="login-container">
+            <!-- Logo -->
+            <div class="logo">
+                <svg width="140" height="35" viewBox="0 0 140 35" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <!-- Simple App Icon -->
+                    <rect x="2" y="2" width="31" height="31" rx="7" fill="#1890FF" />
+                    <rect x="2" y="2" width="31" height="31" rx="7" stroke="#096DD9" stroke-width="2" />
+                    <path d="M17.5 10L12 17.5H15.5V25L19.5 25V17.5H23L17.5 10Z" fill="#FFFFFF" />
+                    <!-- App Name Text -->
+                    <text x="40" y="23" font-family="system-ui, -apple-system, sans-serif" font-size="18" font-weight="600" fill="#1a1a1a" fill-opacity="0.85">
+                        My App
+                    </text>
+                </svg>
+            </div>
+
+            <!-- Heading -->
+            <div class="heading">
+                <h1>Sign In</h1>
+            </div>
+
+            <!-- Login Form -->
+            <form id="loginForm" onsubmit="return handleLogin(event)">
+                <!-- Email Input -->
+                <div class="form-group">
+                    <label class="form-label">Email <span class="required">*</span></label>
+                    <input
+                        type="email"
+                        class="form-input"
+                        placeholder="Enter your email"
+                        id="email"
+                        required
+                    >
+                </div>
+
+                <!-- Password Input -->
+                <div class="form-group">
+                    <label class="form-label">Password <span class="required">*</span></label>
+                    <div class="password-wrapper">
+                        <input
+                            type="password"
+                            class="form-input"
+                            placeholder="Enter your password"
+                            id="password"
+                            required
+                        >
+                        <span class="toggle-password" onclick="togglePassword()" id="toggleIcon">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                                <circle cx="12" cy="12" r="3"></circle>
+                            </svg>
+                        </span>
+                    </div>
+                </div>
+
+                <!-- Sign In Button -->
+                <button type="submit" class="btn-signin">Sign In</button>
+            </form>
+
+            <!-- Divider -->
+            <div class="divider">
+                <span>OR</span>
+            </div>
+
+            <!-- Microsoft Login Button -->
+            <button class="btn-microsoft" onclick="handleMicrosoftLogin()">
+                <svg width="20" height="20" viewBox="0 0 23 23" fill="none">
+                    <path d="M0 0h10.933v10.933H0z" fill="#f25022"/>
+                    <path d="M12.067 0H23v10.933H12.067z" fill="#00a4ef"/>
+                    <path d="M0 12.067h10.933V23H0z" fill="#7fba00"/>
+                    <path d="M12.067 12.067H23V23H12.067z" fill="#ffb900"/>
+                </svg>
+                Continue with Microsoft
+            </button>
+
+            <!-- Support Text -->
+            <p class="support-text">
+                Experiencing access issues or require assistance?<br>
+                Please contact <a href="mailto:support@test.com">support@test.com</a>
+            </p>
+        </div>
+    </div>
+
+    <script>
+        // Toggle Password Visibility
+        function togglePassword() {
+            const passwordInput = document.getElementById('password');
+            const toggleIcon = document.getElementById('toggleIcon');
+
+            if (passwordInput.type === 'password') {
+                passwordInput.type = 'text';
+                toggleIcon.innerHTML = `
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+                        <line x1="1" y1="1" x2="23" y2="23"></line>
+                    </svg>
+                `;
+            } else {
+                passwordInput.type = 'password';
+                toggleIcon.innerHTML = `
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                        <circle cx="12" cy="12" r="3"></circle>
+                    </svg>
+                `;
+            }
+        }
+
+        // Handle Login Form Submission
+        function handleLogin(event) {
+            event.preventDefault();
+
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+
+            // Simple validation
+            if (!email || !password) {
+                alert('Please fill in all required fields');
+                return false;
+            }
+
+            // Email validation
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if (!emailRegex.test(email)) {
+                alert('Please enter a valid email address');
+                return false;
+            }
+
+            // Simulate login process
+            console.log('Login attempt:', { email, password: '***' });
+            alert('Login successful! (This is a demo)');
+
+            return false;
+        }
+
+        // Handle Microsoft Login
+        function handleMicrosoftLogin() {
+            alert('Microsoft login integration would be implemented here.');
+            console.log('Microsoft login clicked');
+        }
+
+        // Add smooth focus effects
+        document.querySelectorAll('.form-input').forEach(input => {
+            input.addEventListener('focus', function() {
+                this.parentElement.classList.add('focused');
+            });
+
+            input.addEventListener('blur', function() {
+                this.parentElement.classList.remove('focused');
+            });
+        });
+    </script>
+</body>
+</html>

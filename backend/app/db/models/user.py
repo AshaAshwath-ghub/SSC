@@ -19,6 +19,10 @@ class User(Base, TimestampMixin):
     first_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     last_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
 
+    # Contact information for MFA
+    phone_number: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # E.164 format: +1234567890
+    duo_username: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)  # Duo username/identifier
+
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_superuser: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

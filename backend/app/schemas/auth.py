@@ -2,7 +2,7 @@
 Authentication schemas for request/response validation.
 """
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 from pydantic import BaseModel, EmailStr, Field
 
 
@@ -45,11 +45,14 @@ class UserResponse(BaseModel):
 class LoginResponse(BaseModel):
     """Login response schema."""
 
-    access_token: str = Field(..., description="JWT access token")
-    refresh_token: str = Field(..., description="JWT refresh token")
+    access_token: Optional[str] = Field(None, description="JWT access token (only provided after MFA)")
+    refresh_token: Optional[str] = Field(None, description="JWT refresh token (only provided after MFA)")
     token_type: str = Field(default="bearer", description="Token type")
-    user: UserResponse = Field(..., description="User information")
+    user: Optional[UserResponse] = Field(None, description="User information (only provided after MFA)")
     requires_mfa: bool = Field(default=False, description="Whether MFA is required")
+    mfa_token: Optional[str] = Field(None, description="Temporary token for MFA verification")
+    mfa_method: Optional[str] = Field(None, description="MFA method required (e.g., 'duo_push', 'selection')")
+    available_mfa_methods: Optional[List[str]] = Field(None, description="Available MFA methods user can choose from")
 
     model_config = {
         "json_schema_extra": {
@@ -66,6 +69,70 @@ class LoginResponse(BaseModel):
                         "is_verified": True
                     },
                     "requires_mfa": False
+                }
+            ]
+        }
+    }
+
+
+class MFATriggerRequest(BaseModel):
+    """Request to trigger a specific MFA method."""
+
+    mfa_token: str = Field(..., description="Temporary MFA token from login response")
+    method: str = Field(..., description="MFA method to trigger: 'duo_push', 'duo_phone', 'duo_sms', 'email_otp'")
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "mfa_token": "temp_mfa_token_here",
+                    "method": "duo_push"
+                }
+            ]
+        }
+    }
+
+
+class MFAVerifyRequest(BaseModel):
+    """MFA verification request schema."""
+
+    mfa_token: str = Field(..., description="Temporary MFA token from login response")
+    passcode: Optional[str] = Field(None, description="Optional OTP passcode (if not using push)")
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "mfa_token": "temp_mfa_token_here",
+                    "passcode": "123456"
+                }
+            ]
+        }
+    }
+
+
+class MFAStatusResponse(BaseModel):
+    """MFA push notification status response."""
+
+    status: str = Field(..., description="Push status: 'pending', 'approved', 'denied', 'error'")
+    message: str = Field(..., description="Status message")
+    access_token: Optional[str] = Field(None, description="Access token if approved")
+    refresh_token: Optional[str] = Field(None, description="Refresh token if approved")
+    user: Optional[UserResponse] = Field(None, description="User info if approved")
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "status": "pending",
+                    "message": "Waiting for push approval..."
+                },
+                {
+                    "status": "approved",
+                    "message": "Login successful",
+                    "access_token": "eyJhbGc...",
+                    "refresh_token": "eyJhbGc...",
+                    "user": {"id": 1, "username": "testuser", "email": "test@example.com"}
                 }
             ]
         }

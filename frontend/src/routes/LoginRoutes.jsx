@@ -45,11 +45,18 @@ const SupabaseAuthResetPassword = Loadable(lazy(() => import('pages/auth/supabas
 const SupabaseAuthCodeVerification = Loadable(lazy(() => import('pages/auth/supabase/code-verification')));
 const SupabaseAuthCheckMail = Loadable(lazy(() => import('pages/auth/supabase/check-mail')));
 
+// oauth callback
+const OAuthCallback = Loadable(lazy(() => import('pages/auth/oauth-callback')));
+
 // ==============================|| AUTH ROUTING ||============================== //
 
 const LoginRoutes = {
   path: '/',
   children: [
+    {
+      path: 'oauth/callback',
+      element: <OAuthCallback />
+    },
     {
       path: '/',
       element: <AuthLayout />,

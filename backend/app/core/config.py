@@ -95,15 +95,32 @@ class Settings(BaseSettings):
     facebook_app_secret: str = Field(default="", alias="FACEBOOK_APP_SECRET")
     facebook_redirect_uri: str = Field(default="", alias="FACEBOOK_REDIRECT_URI")
 
+    apple_client_id: str = Field(default="", alias="APPLE_CLIENT_ID")  # Service ID
+    apple_team_id: str = Field(default="", alias="APPLE_TEAM_ID")
+    apple_key_id: str = Field(default="", alias="APPLE_KEY_ID")
+    apple_private_key: str = Field(default="", alias="APPLE_PRIVATE_KEY")  # Content of .p8 file
+    apple_redirect_uri: str = Field(default="", alias="APPLE_REDIRECT_URI")
+
     # MFA Providers
     twilio_account_sid: str = Field(default="", alias="TWILIO_ACCOUNT_SID")
     twilio_auth_token: str = Field(default="", alias="TWILIO_AUTH_TOKEN")
     twilio_phone_number: str = Field(default="", alias="TWILIO_PHONE_NUMBER")
     twilio_verify_service_sid: str = Field(default="", alias="TWILIO_VERIFY_SERVICE_SID")
 
-    duo_integration_key: str = Field(default="", alias="DUO_INTEGRATION_KEY")
-    duo_secret_key: str = Field(default="", alias="DUO_SECRET_KEY")
-    duo_api_hostname: str = Field(default="", alias="DUO_API_HOSTNAME")
+    # Duo Auth API (for push authentication)
+    duo_auth_ikey: str = Field(default="", alias="DUO_AUTH_IKEY")
+    duo_auth_skey: str = Field(default="", alias="DUO_AUTH_SKEY")
+    duo_auth_host: str = Field(default="", alias="DUO_AUTH_HOST")
+
+    # Duo Admin API (for user management)
+    duo_admin_ikey: str = Field(default="", alias="DUO_ADMIN_IKEY")
+    duo_admin_skey: str = Field(default="", alias="DUO_ADMIN_SKEY")
+    duo_admin_host: str = Field(default="", alias="DUO_ADMIN_HOST")
+
+    # SendGrid Configuration (for Email OTP)
+    sendgrid_api_key: str = Field(default="", alias="SENDGRID_API_KEY")
+    sendgrid_from_email: str = Field(default="noreply@yourdomain.com", alias="SENDGRID_FROM_EMAIL")
+    sendgrid_from_name: str = Field(default="Application", alias="SENDGRID_FROM_NAME")
 
     # Email Configuration
     smtp_host: str = Field(default="smtp.gmail.com", alias="SMTP_HOST")

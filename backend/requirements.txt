@@ -27,6 +27,7 @@ python-multipart>=0.0.12
 
 # External Services
 twilio>=9.3.7              # SMS/Voice
+sendgrid>=6.11.0           # Email Service
 duo-client>=5.3.0          # Duo MFA
 pyotp>=2.9.0              # TOTP (2FA)
 qrcode>=8.0               # QR code generation
