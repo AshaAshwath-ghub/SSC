@@ -39,6 +39,13 @@ class PostgreSQLAdapter:
                 max_overflow=settings.db_max_overflow,
                 pool_pre_ping=True,  # Verify connections before using
                 pool_recycle=3600,  # Recycle connections after 1 hour
+                connect_args={
+                    "timeout": 30,  # Connection timeout in seconds
+                    "command_timeout": 30,  # Command execution timeout
+                    "server_settings": {
+                        "application_name": "ssc_app"
+                    }
+                }
             )
 
             self._session_factory = async_sessionmaker(
