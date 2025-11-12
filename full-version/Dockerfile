@@ -9,10 +9,10 @@ RUN npm install --legacy-peer-deps
 
 # Copy source code
 COPY . .
-COPY .env .
 
-# Build the app
-RUN npm install 
+# Build the app with environment variables
+ARG VITE_APP_API_URL=http://localhost:3010/
+ENV VITE_APP_API_URL=$VITE_APP_API_URL
 RUN npm run build
 
 # Production image: serve static files
@@ -25,7 +25,6 @@ RUN rm -rf ./*
 
 # Copy built assets from builder
 COPY --from=builder /app/dist .
-
 
 # Copy custom nginx site config for SPA routing
 COPY default.conf /etc/nginx/conf.d/default.conf
