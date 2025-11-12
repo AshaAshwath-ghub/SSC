@@ -36,9 +36,6 @@ htmlcov/
 *.swo
 *~
 
-# Environment
-.env
-.env.*
 
 # Logs
 logs/

@@ -1,0 +1,35 @@
+# Dockerfile for full-version React app (Vite)
+FROM node:20-slim AS builder
+
+WORKDIR /app
+
+# Install dependencies
+COPY package.json package-lock.json* ./
+RUN npm install --legacy-peer-deps
+
+# Copy source code
+COPY . .
+COPY .env .
+
+# Build the app
+RUN npm install 
+RUN npm run build
+
+# Production image: serve static files
+FROM nginx:alpine
+
+WORKDIR /usr/share/nginx/html
+
+# Remove default nginx static assets
+RUN rm -rf ./*
+
+# Copy built assets from builder
+COPY --from=builder /app/dist .
+
+
+# Copy custom nginx site config for SPA routing
+COPY default.conf /etc/nginx/conf.d/default.conf
+
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]
