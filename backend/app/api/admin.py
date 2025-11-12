@@ -8,6 +8,7 @@ from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+
 from app.core.security import hash_password
 from app.core.logging import get_logger
 from app.core.duo_security import get_duo_service
