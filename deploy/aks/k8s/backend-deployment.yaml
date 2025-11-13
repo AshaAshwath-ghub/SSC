@@ -1,0 +1,98 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-backend
+  namespace: ssc
+  labels:
+    app: auth-backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: auth-backend
+  template:
+    metadata:
+      labels:
+        app: auth-backend
+    spec:
+      containers:
+      - name: backend
+        image: jgacr.azurecr.io/auth-backend:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 3010
+          name: http
+        env:
+        - name: DB_HOST
+          value: "ssc-postgres-postgresql.ssc.svc.cluster.local"
+        - name: DB_PORT
+          value: "5432"
+        - name: MONGO_URI
+          value: "mongodb://ssc-mongo-mongodb.ssc.svc.cluster.local:27017/appdb"
+        - name: REDIS_URL
+          value: "redis://ssc-redis-master.ssc.svc.cluster.local:6379/0"
+        - name: PORT
+          value: "3010"
+        - name: HOST
+          value: "0.0.0.0"
+        - name: CORS_ORIGINS
+          value: '["https://authsecure.internal.jillellagroup.com","http://localhost:3000","http://localhost:5173"]'
+        - name: SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: oauth-secrets
+              key: secret-key
+        - name: JWT_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: oauth-secrets
+              key: jwt-secret-key
+        - name: DEBUG
+          value: "true"
+        - name: FRONTEND_URL
+          value: "https://authsecure.internal.jillellagroup.com"
+        - name: GOOGLE_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              name: oauth-secrets
+              key: google-client-id
+        - name: GOOGLE_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: oauth-secrets
+              key: google-client-secret
+        - name: GOOGLE_REDIRECT_URI
+          value: "https://authsecure.internal.jillellagroup.com/api/v1/oauth/google/callback"
+        - name: MICROSOFT_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              name: oauth-secrets
+              key: microsoft-client-id
+        - name: MICROSOFT_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: oauth-secrets
+              key: microsoft-client-secret
+        - name: MICROSOFT_REDIRECT_URI
+          value: "https://authsecure.internal.jillellagroup.com/api/v1/oauth/microsoft/callback"
+        - name: MICROSOFT_TENANT
+          valueFrom:
+            secretKeyRef:
+              name: oauth-secrets
+              key: microsoft-tenant
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 3010
+          initialDelaySeconds: 40
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 3010
+          initialDelaySeconds: 20
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3

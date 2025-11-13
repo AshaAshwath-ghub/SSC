@@ -35,6 +35,9 @@ class Settings(BaseSettings):
         alias="CORS_ORIGINS"
     )
 
+    # Frontend URL for OAuth redirects
+    frontend_url: str = Field(default="http://localhost:3000", alias="FRONTEND_URL")
+
     # Security
     secret_key: str = Field(..., alias="SECRET_KEY")
     jwt_secret_key: str = Field(..., alias="JWT_SECRET_KEY")

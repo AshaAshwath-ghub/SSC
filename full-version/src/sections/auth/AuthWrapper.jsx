@@ -46,7 +46,7 @@ export default function AuthWrapper({ children }) {
                 <Box sx={{ maxWidth: { xs: 400, sm: 475 }, margin: { xs: 2.5, md: 3 }, '& > *': { flexGrow: 1, flexBasis: '50%' } }}>
                   <Grid size={12}>
                     <Divider sx={{ mb: 3 }}>
-                      <Typography variant="caption"> Check other login views </Typography>
+                      <Typography variant="caption"> OR </Typography>
                     </Divider>
                   </Grid>
                   <Grid size={12}>

@@ -1,0 +1,29 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: auth-ingress
+  namespace: ssc
+spec:
+  ingressClassName: traefik-private
+  tls:
+  - hosts:
+    - authsecure.internal.jillellagroup.com
+    secretName: internal-jillellagroup-com-secret
+  rules:
+  - host: authsecure.internal.jillellagroup.com
+    http:
+      paths:
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: auth-backend
+            port:
+              number: 3010
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: auth-frontend
+            port:
+              number: 80

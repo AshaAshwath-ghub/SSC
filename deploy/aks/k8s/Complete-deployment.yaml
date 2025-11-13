@@ -1,0 +1,123 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-backend
+  namespace: ssc
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: auth-backend
+  template:
+    metadata:
+      labels:
+        app: auth-backend
+    spec:
+      containers:
+      - name: backend
+        image: jgacr.azurecr.io/auth-backend:latest
+        env:
+        - name: DB_HOST
+          value: ssc-postgres-postgresql.ssc.svc.cluster.local
+        - name: DB_PORT
+          value: "5432"
+        - name: POSTGRES_PASSWORD
+          value: example
+        - name: MONGO_URI
+          value: mongodb://ssc-mongo-mongodb.ssc.svc.cluster.local:27017/appdb
+        - name: REDIS_URL
+          value: redis://ssc-redis-master.ssc.svc.cluster.local:6379/0
+        - name: PORT
+          value: "3010"
+        - name: HOST
+          value: 0.0.0.0
+        - name: CORS_ORIGINS
+          value: '["http://20.237.58.204","http://localhost:3000","http://localhost:5173"]'
+        - name: SECRET_KEY
+          value: your-secret-key-change-in-production-min-32-chars
+        - name: JWT_SECRET_KEY
+          value: your-jwt-secret-key-change-in-production-min-32-chars
+        - name: DEBUG
+          value: "true"
+        ports:
+        - containerPort: 3010
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 3010
+          initialDelaySeconds: 40
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 3010
+          initialDelaySeconds: 20
+          periodSeconds: 10
+        resources:
+          limits:
+            cpu: 200m
+            memory: 256Mi
+          requests:
+            cpu: 50m
+            memory: 128Mi
+      restartPolicy: Always
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth-backend
+  namespace: ssc
+spec:
+  selector:
+    app: auth-backend
+  ports:
+  - protocol: TCP
+    port: 3010
+    targetPort: 3010
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-frontend
+  namespace: ssc
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: auth-frontend
+  template:
+    metadata:
+      labels:
+        app: auth-frontend
+    spec:
+      containers:
+      - name: auth-frontend
+        image: jgacr.azurecr.io/auth-frontend:latest
+        env:
+        - name: VITE_API_URL
+          value: http://auth-backend:3010/api/v1
+        - name: REACT_APP_API_URL
+          value: http://auth-backend:3010/api/v1
+        ports:
+        - containerPort: 80
+        resources:
+          limits:
+            cpu: 200m
+            memory: 256Mi
+          requests:
+            cpu: 50m
+            memory: 128Mi
+      restartPolicy: Always
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth-frontend
+  namespace: ssc
+spec:
+  selector:
+    app: auth-frontend
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 80

@@ -12,7 +12,9 @@ COPY . .
 
 # Build the app with environment variables
 ARG VITE_APP_API_URL=http://localhost:3010/
+ARG VITE_APP_BASE_URL=http://localhost:3000
 ENV VITE_APP_API_URL=$VITE_APP_API_URL
+ENV VITE_APP_BASE_URL=$VITE_APP_BASE_URL
 RUN npm run build
 
 # Production image: serve static files
