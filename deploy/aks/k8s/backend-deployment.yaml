@@ -18,7 +18,7 @@ spec:
       containers:
       - name: backend
         image: jgacr.azurecr.io/auth-backend:latest
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Always
         ports:
         - containerPort: 3010
           name: http

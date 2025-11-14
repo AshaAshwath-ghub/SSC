@@ -266,7 +266,6 @@ async def _handle_oauth_callback(provider: str, code: str, state: Optional[str] 
             )
 
             # Redirect to frontend with tokens
-            from app.core.config import settings
             frontend_url = f"{settings.frontend_url}/oauth/callback"
             redirect_params = {
                 "access_token": access_token,

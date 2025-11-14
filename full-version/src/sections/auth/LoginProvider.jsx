@@ -31,15 +31,17 @@ export default function LoginProvider({ currentLoginWith }) {
   const navigate = useNavigate();
   const [openAppleModal, setOpenAppleModal] = useState(false);
 
+  const apiUrl = (import.meta.env.VITE_APP_API_URL || 'http://localhost:3010').replace(/\/$/, '');
+
   const loginHandlers = {
     Jwt: () => navigate(APP_AUTH === AuthProvider.JWT ? '/login' : '/jwt/login?auth=jwt'),
     Google: () => {
       // Redirect to Google OAuth
-      window.location.href = 'http://localhost:3010/api/v1/oauth/google/authorize';
+      window.location.href = `${apiUrl}/api/v1/oauth/google/authorize`;
     },
     Microsoft: () => {
       // Redirect to Microsoft OAuth
-      window.location.href = 'http://localhost:3010/api/v1/oauth/microsoft/authorize';
+      window.location.href = `${apiUrl}/api/v1/oauth/microsoft/authorize`;
     },
     Apple: () => {
       // Open modal instead of alert
