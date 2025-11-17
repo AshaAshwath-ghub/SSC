@@ -41,3 +41,29 @@ We use a mock backend to provide necessary data and handle JWT authentication as
 Need further help? Reach out to community
 <br/>
 💬 [Join us on Discord](https://discord.com/invite/p2E2WhCb6s)
+
+
+
+##Deploy 
+
+ Step 1: Rebuild Frontend
+
+  cd C:\SSC\SSC\full-version
+  docker build --build-arg VITE_APP_API_URL=https://authsecure.internal.jillellagroup.com --build-arg
+  VITE_APP_BASE_URL=https://authsecure.internal.jillellagroup.com -t jgacr.azurecr.io/auth-frontend:latest .
+
+  Step 2: Push to ACR
+
+  az acr login --name jgacr
+  docker push jgacr.azurecr.io/auth-frontend:latest
+
+  Step 3: Restart Frontend
+
+  kubectl rollout restart deployment auth-frontend -n ssc
+
+  Step 4: Verify
+
+  kubectl get pods -n ssc -l app=auth-frontend
+
+  Once the pod is running, visit:
+  https://authsecure.internal.jillellagroup.com/login
