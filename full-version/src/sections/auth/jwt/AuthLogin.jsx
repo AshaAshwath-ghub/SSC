@@ -465,41 +465,7 @@ export default function AuthLogin({ isDemo = false }) {
           </Typography>
 
           <Stack spacing={2}>
-            {availableMfaMethods.includes('duo_push') && (
-              <Button
-                fullWidth
-                variant="outlined"
-                size="large"
-                onClick={() => triggerMfaMethod('duo_push')}
-                startIcon={<MobileOutlined />}
-                sx={{ justifyContent: 'flex-start', py: 2, textAlign: 'left' }}
-              >
-                <Box>
-                  <Typography variant="subtitle1">Duo Push Notification</Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    Get a push notification on your Duo Mobile app
-                  </Typography>
-                </Box>
-              </Button>
-            )}
-
-            {availableMfaMethods.includes('duo_phone') && (
-              <Button
-                fullWidth
-                variant="outlined"
-                size="large"
-                onClick={() => triggerMfaMethod('duo_phone')}
-                startIcon={<PhoneOutlined />}
-                sx={{ justifyContent: 'flex-start', py: 2, textAlign: 'left' }}
-              >
-                <Box>
-                  <Typography variant="subtitle1">Phone Call</Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    Receive an automated phone call
-                  </Typography>
-                </Box>
-              </Button>
-            )}
+            
 
             {/* Hidden for now - SMS Passcode (Duo) */}
             {/* {availableMfaMethods.includes('duo_sms') && (
@@ -568,7 +534,43 @@ export default function AuthLogin({ isDemo = false }) {
                 <Box>
                   <Typography variant="subtitle1">Authenticator App</Typography>
                   <Typography variant="caption" color="text.secondary">
-                    Use your authenticator app (Google Authenticator, Authy, etc.)
+                    Use your authenticator app 
+                  </Typography>
+                </Box>
+              </Button>
+            )}
+
+            {availableMfaMethods.includes('duo_push') && (
+              <Button
+                fullWidth
+                variant="outlined"
+                size="large"
+                onClick={() => triggerMfaMethod('duo_push')}
+                startIcon={<MobileOutlined />}
+                sx={{ justifyContent: 'flex-start', py: 2, textAlign: 'left' }}
+              >
+                <Box>
+                  <Typography variant="subtitle1">Duo Push Notification</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Get a push notification on your Duo Mobile app
+                  </Typography>
+                </Box>
+              </Button>
+            )}
+
+            {availableMfaMethods.includes('duo_phone') && (
+              <Button
+                fullWidth
+                variant="outlined"
+                size="large"
+                onClick={() => triggerMfaMethod('duo_phone')}
+                startIcon={<PhoneOutlined />}
+                sx={{ justifyContent: 'flex-start', py: 2, textAlign: 'left' }}
+              >
+                <Box>
+                  <Typography variant="subtitle1">Phone Call</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Receive an automated phone call
                   </Typography>
                 </Box>
               </Button>
@@ -685,8 +687,8 @@ export default function AuthLogin({ isDemo = false }) {
         // Show normal login form
         <Formik
           initialValues={{
-            email: 'niteesh.kl@jillellagroup.com',
-            password: 'SecurePass123!',
+            email: '',
+            password: '',
             submit: null
           }}
           validationSchema={Yup.object().shape({

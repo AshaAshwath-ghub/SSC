@@ -31,9 +31,9 @@ export default function WelcomeBanner() {
           <Stack
             sx={(theme) => ({ gap: 2, padding: 3.4, color: 'background.paper', ...theme.applyStyles('dark', { color: 'text.primary' }) })}
           >
-            <Typography variant="h2">Welcome to Mantis</Typography>
+            <Typography variant="h2">Welcome to Dashboard</Typography>
             <Typography variant="h6">
-              The purpose of a product update is to add new features, fix bugs or improve the performance of the product.
+              Manage your operations efficiently with real-time insights and comprehensive analytics.
             </Typography>
             <Box>
               <Button

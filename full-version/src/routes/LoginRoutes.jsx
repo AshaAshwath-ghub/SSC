@@ -7,6 +7,10 @@ import { APP_AUTH, AuthProvider } from 'config';
 
 // jwt auth
 const JwtAuthLogin = Loadable(lazy(() => import('pages/auth/jwt/login')));
+const JwtAuthLoginV1 = Loadable(lazy(() => import('pages/auth/jwt/loginV1')));
+const JwtAuthLoginV2 = Loadable(lazy(() => import('pages/auth/jwt/loginV2')));
+const JwtAuthLoginV3 = Loadable(lazy(() => import('pages/auth/jwt/loginV3')));
+const JwtAuthLoginV4 = Loadable(lazy(() => import('pages/auth/jwt/loginV4')));
 const JwtAuthRegister = Loadable(lazy(() => import('pages/auth/jwt/register')));
 const JwtAuthForgotPassword = Loadable(lazy(() => import('pages/auth/jwt/forgot-password')));
 const JwtAuthResetPassword = Loadable(lazy(() => import('pages/auth/jwt/reset-password')));
@@ -57,6 +61,23 @@ const LoginRoutes = {
     {
       path: 'oauth/callback',
       element: <OAuthCallback />
+    },
+    // Login Variants (full-screen layouts without AuthLayout wrapper)
+    {
+      path: 'loginV1',
+      element: <JwtAuthLoginV1 />
+    },
+    {
+      path: 'loginV2',
+      element: <JwtAuthLoginV2 />
+    },
+    {
+      path: 'loginV3',
+      element: <JwtAuthLoginV3 />
+    },
+    {
+      path: 'loginV4',
+      element: <JwtAuthLoginV4 />
     },
     {
       path: '/',
