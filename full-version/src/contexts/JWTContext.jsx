@@ -97,8 +97,12 @@ export const JWTProvider = ({ children }) => {
     init();
   }, []);
 
-  const login = async (email, password) => {
-    const response = await axios.post('/api/v1/auth/login', { email, password });
+  const login = async (email, password, recaptchaToken = null) => {
+    const response = await axios.post('/api/v1/auth/login', {
+      email,
+      password,
+      recaptcha_token: recaptchaToken
+    });
     const { access_token, user, requires_mfa, mfa_token, mfa_method, available_mfa_methods } = response.data;
 
     // Check if MFA is required

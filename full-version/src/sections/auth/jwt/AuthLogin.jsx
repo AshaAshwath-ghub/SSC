@@ -1,6 +1,7 @@
 import PropTypes from 'prop-types';
 import React, { useEffect, useRef } from 'react';
 import { Link as RouterLink, useSearchParams } from 'react-router-dom';
+import ReCAPTCHA from 'react-google-recaptcha';
 
 // material-ui
 import Button from '@mui/material/Button';
@@ -56,8 +57,10 @@ export default function AuthLogin({ isDemo = false }) {
   const [otpBoxes, setOtpBoxes] = React.useState(['', '', '', '', '', '']); // 6 boxes for OTP
   const otpInputRefs = useRef([]);
   const pollingInterval = useRef(null);
+  const recaptchaRef = useRef(null);
 
   const { login, verifyMFA } = useAuth();
+  const recaptchaSiteKey = import.meta.env.VITE_APP_RECAPTCHA_SITE_KEY;
 
   const [showPassword, setShowPassword] = React.useState(false);
   const handleClickShowPassword = () => {
@@ -699,8 +702,22 @@ export default function AuthLogin({ isDemo = false }) {
           })}
           onSubmit={async (values, { setErrors, setStatus, setSubmitting }) => {
             try {
+              // Execute reCAPTCHA v3 before login
+              let recaptchaToken = null;
+              if (recaptchaSiteKey && recaptchaRef.current) {
+                try {
+                  recaptchaToken = await recaptchaRef.current.executeAsync();
+                  recaptchaRef.current.reset(); // Reset for next submission
+                } catch (recaptchaError) {
+                  console.error('reCAPTCHA execution failed:', recaptchaError);
+                  setErrors({ submit: 'Security verification failed. Please try again.' });
+                  setSubmitting(false);
+                  return;
+                }
+              }
+
               const trimmedEmail = values.email.trim();
-              const result = await login(trimmedEmail, values.password);
+              const result = await login(trimmedEmail, values.password, recaptchaToken);
               console.log('Login result:', result);
 
               // Check if MFA is required
@@ -853,6 +870,14 @@ export default function AuthLogin({ isDemo = false }) {
                 </AnimateButton>
               </Grid>
             </Grid>
+            {recaptchaSiteKey && (
+              <ReCAPTCHA
+                ref={recaptchaRef}
+                size="invisible"
+                sitekey={recaptchaSiteKey}
+                badge="bottomright"
+              />
+            )}
           </form>
           )}
         </Formik>

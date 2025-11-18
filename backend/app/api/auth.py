@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 import redis.asyncio as redis
+import httpx
 
 from app.core.config import settings
 from app.core.security import verify_password, create_access_token, create_refresh_token
@@ -40,6 +41,17 @@ logger = get_logger(__name__)
 # Redis client for MFA token storage
 _redis_client: Optional[redis.Redis] = None
 
+# HTTP client for reCAPTCHA verification (reuse connection pool)
+_http_client: Optional[httpx.AsyncClient] = None
+
+
+async def get_http_client() -> httpx.AsyncClient:
+    """Get or create HTTP client for external API calls."""
+    global _http_client
+    if _http_client is None:
+        _http_client = httpx.AsyncClient(timeout=10.0)
+    return _http_client
+
 
 async def get_redis_client() -> redis.Redis:
     """Get or create Redis client."""
@@ -47,6 +59,92 @@ async def get_redis_client() -> redis.Redis:
     if _redis_client is None:
         _redis_client = redis.from_url(settings.redis_url, decode_responses=True)
     return _redis_client
+
+
+async def verify_recaptcha(token: str, remote_ip: Optional[str] = None) -> dict:
+    """
+    Verify reCAPTCHA v3 token with Google's API.
+
+    Args:
+        token: reCAPTCHA token from frontend
+        remote_ip: Optional IP address of the user
+
+    Returns:
+        dict with verification result containing:
+            - success (bool): Whether verification passed
+            - score (float): Risk score from 0.0 to 1.0 (1.0 = very likely human)
+            - action (str): Action name from frontend
+            - challenge_ts (str): Timestamp of the challenge
+            - hostname (str): Hostname of the site
+
+    Raises:
+        HTTPException: If reCAPTCHA verification fails or service is unavailable
+    """
+    if not settings.recaptcha_enabled:
+        logger.info("reCAPTCHA verification skipped (disabled in settings)")
+        return {"success": True, "score": 1.0, "bypass": True}
+
+    if not token:
+        logger.warning("reCAPTCHA token missing")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Security verification required. Please try again."
+        )
+
+    try:
+        # Use persistent HTTP client to avoid connection pool issues
+        client = await get_http_client()
+        response = await client.post(
+            "https://www.google.com/recaptcha/api/siteverify",
+            data={
+                "secret": settings.recaptcha_secret_key_v3,
+                "response": token,
+                "remoteip": remote_ip
+            }
+        )
+
+        result = response.json()
+        logger.info(f"reCAPTCHA verification result: success={result.get('success')}, score={result.get('score')}")
+
+        if not result.get("success"):
+            error_codes = result.get("error-codes", [])
+            logger.warning(f"reCAPTCHA verification failed: {error_codes}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Security verification failed. Please refresh the page and try again."
+            )
+
+        # Check score threshold for v3
+        score = result.get("score", 0.0)
+        if score < settings.recaptcha_v3_threshold:
+            logger.warning(f"reCAPTCHA score {score} below threshold {settings.recaptcha_v3_threshold}")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Security verification failed. Your activity appears suspicious. Please contact support if you believe this is an error."
+            )
+
+        return result
+
+    except httpx.TimeoutException:
+        logger.error("reCAPTCHA verification timeout")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Security verification service is temporarily unavailable. Please try again."
+        )
+    except httpx.RequestError as e:
+        logger.error(f"reCAPTCHA verification request error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Security verification service is temporarily unavailable. Please try again."
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error during reCAPTCHA verification: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An unexpected error occurred during security verification."
+        )
 
 
 @router.post(
@@ -103,6 +201,16 @@ async def login(
         HTTPException: If credentials are invalid or account is locked
     """
     logger.info(f"Login attempt for email: {credentials.email}")
+
+    # Verify reCAPTCHA token (if enabled and provided)
+    if settings.recaptcha_enabled and credentials.recaptcha_token:
+        remote_ip = request.client.host if request.client else None
+        try:
+            recaptcha_result = await verify_recaptcha(credentials.recaptcha_token, remote_ip)
+            logger.info(f"reCAPTCHA verification passed for {credentials.email}, score: {recaptcha_result.get('score')}")
+        except HTTPException as e:
+            logger.warning(f"reCAPTCHA verification failed for {credentials.email}: {e.detail}")
+            raise
 
     # Get database session
     db_adapter = get_database_adapter()
