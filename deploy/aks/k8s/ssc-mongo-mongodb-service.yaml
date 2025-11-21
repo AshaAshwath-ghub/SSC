@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: ssc-mongo-mongodb
+  namespace: ssc
+spec:
+  selector:
+    app.kubernetes.io/name: mongodb
+    app.kubernetes.io/instance: ssc-mongo
+  ports:
+    - protocol: TCP
+      port: 27017
+      targetPort: 27017
+  type: ClusterIP

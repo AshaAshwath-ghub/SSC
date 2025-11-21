@@ -24,13 +24,17 @@ spec:
           name: http
         env:
         - name: DB_HOST
-          value: "ssc-postgres-postgresql.ssc.svc.cluster.local"
+          value: "ssc-postgres-postgresql-hl.ssc.svc.cluster.local"
         - name: DB_PORT
           value: "5432"
+        - name: DB_USER
+          value: "postgres"
+        - name: DB_PASSWORD
+          value: "postgres"
         - name: MONGO_URI
           value: "mongodb://ssc-mongo-mongodb.ssc.svc.cluster.local:27017/appdb"
         - name: REDIS_URL
-          value: "redis://ssc-redis-master.ssc.svc.cluster.local:6379/0"
+          value: "redis://ssc-redis-headless.ssc.svc.cluster.local:6379/0"
         - name: PORT
           value: "3010"
         - name: HOST
@@ -80,19 +84,4 @@ spec:
             secretKeyRef:
               name: oauth-secrets
               key: microsoft-tenant
-        livenessProbe:
-          httpGet:
-            path: /health
-            port: 3010
-          initialDelaySeconds: 40
-          periodSeconds: 30
-          timeoutSeconds: 10
-          failureThreshold: 3
-        readinessProbe:
-          httpGet:
-            path: /health
-            port: 3010
-          initialDelaySeconds: 20
-          periodSeconds: 10
-          timeoutSeconds: 5
-          failureThreshold: 3
+        
