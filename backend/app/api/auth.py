@@ -32,7 +32,9 @@ from app.schemas.auth import (
     TOTPSetupRequest,
     TOTPSetupResponse,
     TOTPVerifySetupRequest,
-    TOTPVerifySetupResponse
+    TOTPVerifySetupResponse,
+    DuoEnrollmentRequest,
+    DuoEnrollmentResponse
 )
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -341,17 +343,19 @@ async def login(
                     # Build list of available MFA methods
                     available_methods = []
                     devices = user_status.get('devices', [])
+                    duo_result = user_status.get('result')  # 'auth', 'enroll', 'deny', etc.
 
+                    # Only show Duo options if user exists in Duo
+                    # result='deny' means user doesn't exist in Duo at all
+                    # result='enroll' means user exists in Duo but no devices enrolled
+                    # result='auth' means user has devices
+
+                    # Always show Duo Push option (better UX)
+                    # Backend will handle enrollment status when user tries to use it
+                    available_methods.append("duo_push")
+
+                    # Check device capabilities for other Duo options
                     if duo_enrolled:
-                        # User is fully enrolled in Duo - check device capabilities
-                        # Check if user has devices that support push
-                        has_push = any(
-                            'push' in device.get('capabilities', [])
-                            for device in devices
-                        )
-                        if has_push:
-                            available_methods.append("duo_push")
-
                         # Check if user has phone for call
                         has_phone = any(
                             'phone' in device.get('capabilities', [])
@@ -359,15 +363,24 @@ async def login(
                         )
                         if has_phone:
                             available_methods.append("duo_phone")
-                    else:
-                        # User not enrolled - still show Duo Push option
-                        # But will check enrollment when they actually select it
-                        available_methods.append("duo_push")
+
+                    # Log enrollment status for debugging
+                    if duo_result == 'deny':
+                        logger.info(f"User {user.id} not found in Duo - will show 'Contact admin' message if they click Duo Push")
+                    elif duo_result == 'enroll':
+                        logger.info(f"User {user.id} exists in Duo but needs device enrollment - will show 'Contact admin' message")
+                    elif not any('push' in device.get('capabilities', []) for device in devices):
+                        logger.warning(f"User {user.id} enrolled in Duo but device not activated - will show 'Contact admin' message")
 
                     # SMS and Email OTP are always available as fallback methods
-                    # These work independently of Duo device enrollment
-                    available_methods.append("duo_sms")  # Duo SMS
-                    available_methods.append("twilio_sms")  # Twilio SMS (independent)
+                    # Twilio SMS and Email OTP work independently of Duo
+
+                    # Only show Duo SMS if user exists in Duo
+                    if duo_result in ['auth', 'enroll']:
+                        # User exists in Duo - can use Duo SMS
+                        available_methods.append("duo_sms")
+
+                    available_methods.append("twilio_sms")  # Twilio SMS (independent of Duo)
                     available_methods.append("email_otp")  # Email OTP via SendGrid
 
                     # Check if user has TOTP enrolled
@@ -387,6 +400,7 @@ async def login(
                     mfa_data["duo_identifier"] = duo_identifier
                     mfa_data["duo_enrolled"] = duo_enrolled
                     mfa_data["duo_result"] = duo_result
+                    mfa_data["devices"] = devices  # Store device info for enrollment checks
                     mfa_data["available_methods"] = available_methods
                     mfa_data["mfa_pending"] = True
                     await redis_client.setex(
@@ -524,13 +538,24 @@ async def trigger_mfa(
             # Check if user is enrolled in Duo first
             duo_enrolled = mfa_data.get("duo_enrolled", False)
             duo_result = mfa_data.get("duo_result")
+            devices = mfa_data.get("devices", [])
 
-            if not duo_enrolled:
-                # User not enrolled in Duo - show friendly message
-                logger.warning(f"User attempted Duo Push but is not enrolled. Result: {duo_result}")
+            # Check device activation status
+            has_push_device = any('push' in device.get('capabilities', []) for device in devices)
+
+            if duo_result == 'deny':
+                # User not in Duo at all
+                logger.warning(f"User {user_email} attempted Duo Push but not found in Duo system")
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="You are not registered in Duo Security yet. Please contact your administrator to complete Duo enrollment (install Duo Mobile app and register your device) before using Duo Push authentication."
+                    detail="Duo Mobile is not set up for your account. Please contact your administrator to register your account in Duo Security."
+                )
+            elif duo_result == 'enroll' or (duo_enrolled and not has_push_device):
+                # User in Duo but device not activated
+                logger.warning(f"User {user_email} attempted Duo Push but device not activated. Result: {duo_result}, has_push: {has_push_device}")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Your Duo Mobile device is not activated yet. Please contact your administrator to complete device enrollment (install Duo Mobile app and activate your device)."
                 )
 
             # Send Duo Push
@@ -1205,3 +1230,86 @@ async def verify_totp_setup(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="An unexpected error occurred during TOTP verification"
             )
+
+
+@router.post(
+    "/mfa/duo/enroll",
+    response_model=DuoEnrollmentResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Send Duo Enrollment SMS",
+    description="Send SMS with enrollment instructions to user who hasn't set up Duo Mobile yet"
+)
+async def enroll_duo(
+    request: DuoEnrollmentRequest,
+    http_request: Request
+) -> DuoEnrollmentResponse:
+    """
+    Send Duo enrollment SMS to user.
+
+    This endpoint allows users who are registered in Duo (by admin) but haven't
+    enrolled their device yet to receive an SMS with instructions to:
+    1. Install Duo Mobile app
+    2. Register their device
+    3. Complete Duo setup
+
+    Args:
+        request: Enrollment request with mfa_token
+        http_request: FastAPI request object
+
+    Returns:
+        DuoEnrollmentResponse with success status and message
+
+    Raises:
+        HTTPException: If token invalid or enrollment fails
+    """
+    logger.info(f"Duo enrollment SMS requested, token={request.mfa_token[:8]}...")
+
+    try:
+        # Get MFA data from Redis
+        redis_client = await get_redis_client()
+        mfa_data_json = await redis_client.get(f"mfa_token:{request.mfa_token}")
+
+        if not mfa_data_json:
+            logger.warning("Invalid or expired MFA token for enrollment")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid or expired session. Please try logging in again."
+            )
+
+        mfa_data = json.loads(mfa_data_json)
+        duo_identifier = mfa_data.get("duo_identifier")
+        user_email = mfa_data.get("email")
+
+        if not duo_identifier:
+            logger.warning("No Duo identifier found in MFA data")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Unable to process enrollment request. Please try logging in again."
+            )
+
+        # Send enrollment SMS via Duo service
+        duo_service = get_duo_service()
+        result = await duo_service.send_enrollment_sms(duo_identifier)
+
+        if result.get("success"):
+            logger.info(f"Duo enrollment SMS sent successfully to {user_email}")
+            return DuoEnrollmentResponse(
+                success=True,
+                message=result.get("message"),
+                activation_url=result.get("activation_url")
+            )
+        else:
+            logger.warning(f"Failed to send Duo enrollment SMS to {user_email}: {result.get('message')}")
+            return DuoEnrollmentResponse(
+                success=False,
+                message=result.get("message", "Failed to send enrollment instructions.")
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error during Duo enrollment: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An unexpected error occurred while processing enrollment request."
+        )
