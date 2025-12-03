@@ -217,42 +217,6 @@ class TOTPVerifySetupResponse(BaseModel):
     }
 
 
-class DuoEnrollmentRequest(BaseModel):
-    """Request to send Duo enrollment SMS."""
-
-    mfa_token: str = Field(..., description="Temporary MFA token from login response")
-
-    model_config = {
-        "json_schema_extra": {
-            "examples": [
-                {
-                    "mfa_token": "temp_mfa_token_here"
-                }
-            ]
-        }
-    }
-
-
-class DuoEnrollmentResponse(BaseModel):
-    """Response for Duo enrollment SMS request."""
-
-    success: bool = Field(..., description="Whether enrollment SMS was sent successfully")
-    message: str = Field(..., description="User-friendly message")
-    activation_url: Optional[str] = Field(None, description="Optional enrollment portal URL")
-
-    model_config = {
-        "json_schema_extra": {
-            "examples": [
-                {
-                    "success": True,
-                    "message": "Enrollment instructions sent to +1XXX...X789. Please check your phone and follow the link to install Duo Mobile.",
-                    "activation_url": "https://api-xxx.duosecurity.com/portal?code=abc123"
-                }
-            ]
-        }
-    }
-
-
 class ErrorResponse(BaseModel):
     """Error response schema."""
 

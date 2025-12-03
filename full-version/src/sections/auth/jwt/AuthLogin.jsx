@@ -58,10 +58,6 @@ export default function AuthLogin({ isDemo = false }) {
   const otpInputRefs = useRef([]);
   const pollingInterval = useRef(null);
   const recaptchaRef = useRef(null);
-  const [enrollmentLoading, setEnrollmentLoading] = React.useState(false);
-  const [enrollmentMessage, setEnrollmentMessage] = React.useState('');
-  const [showEnrollmentButton, setShowEnrollmentButton] = React.useState(false);
-  const [activationUrl, setActivationUrl] = React.useState('');
 
   const { login, verifyMFA } = useAuth();
   const recaptchaSiteKey = import.meta.env.VITE_APP_RECAPTCHA_SITE_KEY;
@@ -159,18 +155,6 @@ export default function AuthLogin({ isDemo = false }) {
       }
 
       setMfaMessage(errorMessage);
-
-      // Check if this is a Duo enrollment error
-      const isEnrollmentError =
-        errorMessage.toLowerCase().includes('not activated') ||
-        errorMessage.toLowerCase().includes('not set up') ||
-        errorMessage.toLowerCase().includes('contact your administrator');
-
-      if (isEnrollmentError) {
-        setShowEnrollmentButton(true);
-      } else {
-        setShowEnrollmentButton(false);
-      }
     }
   };
 
@@ -366,40 +350,6 @@ export default function AuthLogin({ isDemo = false }) {
     }
   };
 
-  // Handle Duo enrollment SMS request
-  const handleDuoEnrollment = async () => {
-    try {
-      setEnrollmentLoading(true);
-      setEnrollmentMessage('');
-
-      const apiUrl = (import.meta.env.VITE_APP_API_URL || 'http://localhost:3010').replace(/\/$/, '');
-      const url = `${apiUrl}/api/v1/auth/mfa/duo/enroll`;
-
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          mfa_token: mfaToken
-        })
-      });
-
-      const data = await response.json();
-
-      if (response.ok && data.success) {
-        setEnrollmentMessage(data.message || 'Enrollment instructions sent! Please check your phone.');
-      } else {
-        setEnrollmentMessage(data.message || 'Failed to send enrollment instructions. Please try again.');
-      }
-    } catch (error) {
-      console.error('Enrollment SMS error:', error);
-      setEnrollmentMessage('Failed to send enrollment instructions. Please try again.');
-    } finally {
-      setEnrollmentLoading(false);
-    }
-  };
-
   // Cleanup polling on unmount
   useEffect(() => {
     return () => {
@@ -517,15 +467,8 @@ export default function AuthLogin({ isDemo = false }) {
             Select how you want to verify your identity
           </Typography>
 
-          {enrollmentMessage && (
-            <Alert severity={enrollmentMessage.includes('sent') ? 'success' : 'info'} sx={{ mb: 2 }}>
-              {enrollmentMessage}
-            </Alert>
-          )}
-
           <Stack spacing={2}>
-
-            {/* Duo Enrollment Button removed - now handled by clicking Duo Push directly */}
+            
 
             {/* Hidden for now - SMS Passcode (Duo) */}
             {/* {availableMfaMethods.includes('duo_sms') && (
@@ -600,7 +543,6 @@ export default function AuthLogin({ isDemo = false }) {
               </Button>
             )}
 
-            {/* Duo Push - Show ONLY for users with activated Duo Mobile device */}
             {availableMfaMethods.includes('duo_push') && (
               <Button
                 fullWidth
@@ -710,29 +652,7 @@ export default function AuthLogin({ isDemo = false }) {
           <Alert severity="error" sx={{ mb: 2 }}>
             {mfaMessage}
           </Alert>
-
-          {/* Show enrollment success/error message if present */}
-          {enrollmentMessage && (
-            <Alert severity={enrollmentMessage.includes('sent') || enrollmentMessage.includes('instructions') ? 'success' : 'info'} sx={{ mb: 2 }}>
-              {enrollmentMessage}
-            </Alert>
-          )}
-
           <Stack spacing={2}>
-            {/* Show "Send Enrollment SMS" button for Duo enrollment errors */}
-            {showEnrollmentButton && (
-              <Button
-                fullWidth
-                variant="contained"
-                color="warning"
-                onClick={handleDuoEnrollment}
-                disabled={enrollmentLoading}
-                startIcon={<SafetyOutlined />}
-              >
-                {enrollmentLoading ? 'Sending...' : 'Send Duo Enrollment SMS'}
-              </Button>
-            )}
-
             <Button
               fullWidth
               variant="contained"
@@ -742,8 +662,6 @@ export default function AuthLogin({ isDemo = false }) {
                 setSubmittedOtp(null);
                 setOtpCode('');
                 setOtpBoxes(['', '', '', '', '', '']);
-                setShowEnrollmentButton(false);
-                setEnrollmentMessage('');
                 setOtpError('');
                 setSelectedMethod(null);
               }}
